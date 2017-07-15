@@ -206,7 +206,9 @@ y_map
 from tensorflow.contrib.keras.api.keras.callbacks import ModelCheckpoint
 
 best_top_weights_path="weights_top_best.hdf5"
-checkpoint = ModelCheckpoint(best_top_weights_path, monitor='val_acc', verbose=1, save_best_only=True)
+checkpoint_top = ModelCheckpoint(best_top_weights_path, monitor='val_acc', verbose=1, save_best_only=True)
+best_full_weights_path="weights_full_best.hdf5"
+checkpoint_full = ModelCheckpoint(best_full_weights_path, monitor='val_acc', verbose=1, save_best_only=True)
 
 # <markdowncell>
 
@@ -229,37 +231,39 @@ batch_size = 128
 
 # <codecell>
 
-from keras_helper import VGG16DenseRetrainer
-from importlib import reload
-import keras_helper
-reload(keras_helper)
-from keras_helper import VGG16DenseRetrainer
+# Reload keras_helper for VGG16DenseRetrainer class changes
+#from keras_helper import VGG16DenseRetrainer
+#from importlib import reload
+#import keras_helper
+#reload(keras_helper)
+#rom keras_helper import VGG16DenseRetrainer
 
-weights_path = 'vgg16_weights_tf_dim_ordering_tf_kernels_notop.h5' 
+# <codecell>
+
 n_classes = y_train.shape[1]
 
 classifier = VGG16DenseRetrainer()
 print("Classifier initialized.")
 classifier.build_vgg16(img_resize, 3, n_classes)
 print("Vgg16 built.")
-classifier.load_vgg16_weights(weights_path)
-print("Vgg16 weights loaded.")
 classifier.predict_bottleneck_features(x_train, y_train, validation_split_size=validation_split_size)
 print("Vgg16 bottleneck features calculated.")
+
 classifier.build_top_model(n_classes)
 print("Top built, ready to train.")
 
 train_losses, val_losses = [], []
 #epochs_arr = [10, 5, 5]
 #learn_rates = [0.001, 0.0001, 0.00001]
-epochs_arr = [10]
-learn_rates = [0.001]
+epochs_arr = [20]
+learn_rates = [0.00001]
 for learn_rate, epochs in zip(learn_rates, epochs_arr):
     tmp_train_losses, tmp_val_losses, fbeta_score = classifier.train_top_model(x_train, y_train, learn_rate, epochs,
                                                                            batch_size, validation_split_size=validation_split_size, 
-                                                                           train_callbacks=[checkpoint])
+                                                                           train_callbacks=[checkpoint_top])
     train_losses += tmp_train_losses
     val_losses += tmp_val_losses
+    
 
 # <markdowncell>
 
@@ -286,6 +290,74 @@ print("Weights loaded")
 
 plt.plot(train_losses, label='Training loss')
 plt.plot(val_losses, label='Validation loss')
+plt.legend();
+
+# <markdowncell>
+
+# Look at our fbeta_score
+
+# <codecell>
+
+fbeta_score
+
+# <markdowncell>
+
+# ## Retrain full model
+# 
+# Now we retrain the top model together with the last convolutional layer from the VGG16 model
+
+# <codecell>
+
+classifier.build_full_model()
+
+
+
+train_losses_full, val_losses_full = [], []
+epochs_arr = [50]#,300]
+learn_rates = [1e-3]#,1e-4]
+n_untrained_layers = 15
+import time
+
+# TODO: Implement and use bottleneck features for any n_untrained_layers
+#classifier.predict_bottleneck_features(x_train, y_train, validation_split_size, n_untrained_layers)
+
+start = time.time()
+for learn_rate, epochs in zip(learn_rates, epochs_arr):
+    tmp_train_losses, tmp_val_losses, fbeta_score = classifier.fine_tune_full_model(x_train, y_train, learn_rate, epochs,
+                                   batch_size, validation_split_size, 
+                                   n_untrained_layers, train_callbacks=[checkpoint_full])
+    
+    train_losses_full += tmp_train_losses
+    val_losses_full += tmp_val_losses
+end = time.time()
+t_epoch = float(end-start)/sum(epochs_arr)
+print("Training time [s/epoch]: " + str(t_epoch))
+
+# <markdowncell>
+
+# ## Load Best Weights
+
+# <markdowncell>
+
+# Here you should load back in the best weights that were automatically saved by ModelCheckpoint during training
+
+# <codecell>
+
+#classifier.load_full_weights(best_full_weights_path)
+#print("Weights loaded")
+
+# <markdowncell>
+
+# ## Monitor the results
+
+# <markdowncell>
+
+# Check that we do not overfit by plotting the losses of the train and validation sets
+
+# <codecell>
+
+plt.plot(train_losses_full, label='Training loss')
+plt.plot(val_losses_full, label='Validation loss')
 plt.legend();
 
 # <markdowncell>

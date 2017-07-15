@@ -5,15 +5,16 @@ import h5py
 from sklearn.metrics import fbeta_score
 from sklearn.model_selection import train_test_split
 
-import tensorflow.contrib.keras.api.keras as k
-from tensorflow.contrib.keras.api.keras.models import Sequential
-from tensorflow.contrib.keras.api.keras.layers import Activation, Dense, Dropout, Flatten
-from tensorflow.contrib.keras.api.keras.layers import Conv2D, MaxPooling2D, BatchNormalization, ZeroPadding2D
-from tensorflow.contrib.keras.api.keras.optimizers import Adam
-from tensorflow.contrib.keras.api.keras.callbacks import Callback, EarlyStopping
-from tensorflow.contrib.keras import backend
+from keras.models import Sequential
+from keras.layers import Activation, Dense, Dropout, Flatten
+from keras.layers import Conv2D, MaxPooling2D, BatchNormalization, ZeroPadding2D
+from keras.optimizers import Adam
+from keras.callbacks import Callback, EarlyStopping
+from keras import backend
 from keras.engine import topology
 from keras.applications.vgg16 import VGG16
+from keras.models import Model
+from keras import optimizers
 
 # vgg16 weights require th input ordering
 #from keras import backend as K
@@ -128,8 +129,9 @@ class VGG16DenseRetrainer:
     def __init__(self, path_bottleneck_feat_trn='bottleneck_features_train.npy',
                  path_bottleneck_feat_val='bottleneck_features_validation.npy'):
         self.losses = []
-        self.bottleneck_model = Sequential()
+        self.bottleneck_model = None
         self.top_model = Sequential()
+        self.full_model = None
         self.path_bottleneck_feat_trn = path_bottleneck_feat_trn
         self.path_bottleneck_feat_val = path_bottleneck_feat_val
         self.bottleneck_feat_trn = None
@@ -143,78 +145,6 @@ class VGG16DenseRetrainer:
               input_tensor=None, input_shape=(img_width, img_height, img_channels),
               pooling=None,
               classes=n_classes)
-
-    def build_vgg16_old(self, img_size=(32, 32), img_channels=3):
-        img_width = img_size[0]
-        img_height = img_size[1]
-
-        #self.bottleneck_model.add(BatchNormalization(input_shape=(*img_size, img_channels)))
-        """
-        self.bottleneck_model.add(ZeroPadding2D((1, 1), input_shape=(img_width, img_height, img_channels)))
-
-        self.bottleneck_model.add(Conv2D(64, (3, 3), activation='relu', name='conv1_1'))
-        self.bottleneck_model.add(ZeroPadding2D((1, 1)))
-        self.bottleneck_model.add(Conv2D(64, (3, 3), activation='relu', name='conv1_2'))
-        self.bottleneck_model.add(MaxPooling2D(pool_size=2))
-
-        self.bottleneck_model.add(ZeroPadding2D((1, 1)))
-        self.bottleneck_model.add(Conv2D(128, (3, 3), activation='relu', name='conv2_1'))
-        self.bottleneck_model.add(ZeroPadding2D((1, 1)))
-        self.bottleneck_model.add(Conv2D(128, (3, 3), activation='relu', name='conv2_2'))
-        self.bottleneck_model.add(MaxPooling2D(pool_size=2))
-
-        self.bottleneck_model.add(ZeroPadding2D((1, 1)))
-        self.bottleneck_model.add(Conv2D(256, (3, 3), activation='relu', name='conv3_1'))
-        self.bottleneck_model.add(ZeroPadding2D((1, 1)))
-        self.bottleneck_model.add(Conv2D(256, (3, 3), activation='relu', name='conv3_2'))
-        self.bottleneck_model.add(ZeroPadding2D((1, 1)))
-        self.bottleneck_model.add(Conv2D(256, (3, 3), activation='relu', name='conv3_3'))
-        self.bottleneck_model.add(MaxPooling2D(pool_size=2))
-
-        self.bottleneck_model.add(ZeroPadding2D((1, 1)))
-        self.bottleneck_model.add(Conv2D(512, (3, 3), activation='relu', name='conv4_1'))
-        self.bottleneck_model.add(ZeroPadding2D((1, 1)))
-        self.bottleneck_model.add(Conv2D(512, (3, 3), activation='relu', name='conv4_2'))
-        self.bottleneck_model.add(ZeroPadding2D((1, 1)))
-        self.bottleneck_model.add(Conv2D(512, (3, 3), activation='relu', name='conv4_3'))
-        self.bottleneck_model.add(MaxPooling2D(pool_size=2))
-
-        self.bottleneck_model.add(ZeroPadding2D((1, 1)))
-        self.bottleneck_model.add(Conv2D(512, (3, 3), activation='relu', name='conv5_1'))
-        self.bottleneck_model.add(ZeroPadding2D((1, 1)))
-        self.bottleneck_model.add(Conv2D(512, (3, 3), activation='relu', name='conv5_2'))
-        self.bottleneck_model.add(ZeroPadding2D((1, 1)))
-        self.bottleneck_model.add(Conv2D(512, (3, 3), activation='relu', name='conv5_3'))
-        self.bottleneck_model.add(MaxPooling2D(pool_size=2))
-        """
-
-        # Block 1
-        self.bottleneck_model.add(Conv2D(64, (3, 3), activation='relu', padding='same', name='block1_conv1',input_shape=(img_width, img_height, img_channels)))
-        self.bottleneck_model.add(Conv2D(64, (3, 3), activation='relu', padding='same', name='block1_conv2'))
-        self.bottleneck_model.add(MaxPooling2D((2, 2), strides=(2, 2), name='block1_pool'))
-
-        # Block 2
-        self.bottleneck_model.add(Conv2D(128, (3, 3), activation='relu', padding='same', name='block2_conv1'))
-        self.bottleneck_model.add(Conv2D(128, (3, 3), activation='relu', padding='same', name='block2_conv2'))
-        self.bottleneck_model.add(MaxPooling2D((2, 2), strides=(2, 2), name='block2_pool'))
-
-        # Block 3
-        self.bottleneck_model.add(Conv2D(256, (3, 3), activation='relu', padding='same', name='block3_conv1'))
-        self.bottleneck_model.add(Conv2D(256, (3, 3), activation='relu', padding='same', name='block3_conv2'))
-        self.bottleneck_model.add(Conv2D(256, (3, 3), activation='relu', padding='same', name='block3_conv3'))
-        self.bottleneck_model.add(MaxPooling2D((2, 2), strides=(2, 2), name='block3_pool'))
-
-        # Block 4
-        self.bottleneck_model.add(Conv2D(512, (3, 3), activation='relu', padding='same', name='block4_conv1'))
-        self.bottleneck_model.add(Conv2D(512, (3, 3), activation='relu', padding='same', name='block4_conv2'))
-        self.bottleneck_model.add(Conv2D(512, (3, 3), activation='relu', padding='same', name='block4_conv3'))
-        self.bottleneck_model.add(MaxPooling2D((2, 2), strides=(2, 2), name='block4_pool'))
-
-        # Block 5
-        self.bottleneck_model.add(Conv2D(512, (3, 3), activation='relu', padding='same', name='block5_conv1'))
-        self.bottleneck_model.add(Conv2D(512, (3, 3), activation='relu', padding='same', name='block5_conv2'))
-        self.bottleneck_model.add(Conv2D(512, (3, 3), activation='relu', padding='same', name='block5_conv3'))
-        self.bottleneck_model.add(MaxPooling2D((2, 2), strides=(2, 2), name='block5_pool'))
 
     def load_vgg16_weights(self, filepath, by_name=False):
         if h5py is None:
@@ -262,7 +192,7 @@ class VGG16DenseRetrainer:
         return fbeta_score(y_valid, np.array(p_valid) > 0.2, beta=2, average='samples')
 
     def build_top_model(self, n_classes):
-        self.top_model.add(Flatten(input_shape=self.bottleneck_feat_trn.shape[1:]))
+        self.top_model.add(Flatten(input_shape=self.bottleneck_model.output_shape[1:]))
         self.top_model.add(Dense(256, activation='relu'))
         self.top_model.add(Dropout(0.5))
         self.top_model.add(Dense(n_classes, activation='sigmoid'))
@@ -297,9 +227,44 @@ class VGG16DenseRetrainer:
     def load_top_weights(self, weight_file_path):
         self.top_model.load_weights(weight_file_path)
 
+    def load_full_weights(self, weight_file_path):
+        self.full_model.load_weights(weight_file_path)
+
+    def build_full_model(self):
+        self.full_model = Model(input=self.bottleneck_model.input, output=self.top_model(self.bottleneck_model.output))
+        #Model(inputs=self.bottleneck_model.input, outputs=self.top_model.output)
+
+    def fine_tune_full_model(self, x_train, y_train, learn_rate=0.001, epoch=5, batch_size=128, validation_split_size=0.2,
+                             n_untrained_layers=17, train_callbacks=()):
+        """Retrain top model and last vgg16 conv block with light weight updates."""
+        for layer in self.full_model.layers[:n_untrained_layers]:
+            layer.trainable = False
+
+        history = LossHistory()
+
+        X_train, X_valid, y_train, y_valid = train_test_split(x_train, y_train,
+                                                              test_size=validation_split_size)
+
+        self.full_model.compile(loss='binary_crossentropy',
+                      optimizer=optimizers.SGD(lr=learn_rate, momentum=0.9),
+                      metrics=['accuracy'])
+
+        # early stopping will auto-stop training process if model stops learning after 3 epochs
+        earlyStopping = EarlyStopping(monitor='val_loss', patience=3, verbose=0, mode='auto')
+
+        self.full_model.fit(X_train, y_train,
+                           epochs=epoch,
+                           batch_size=batch_size,
+                           verbose=1,
+                           validation_data=(X_valid, y_valid),
+                           callbacks=[history, *train_callbacks, earlyStopping])
+        fbeta_score = self._get_fbeta_score(self.full_model, X_valid, y_valid)
+        return [history.train_losses, history.val_losses, fbeta_score]
+
     def predict(self, x_test):
-        bottleneck_features = self.bottleneck_model.predict(x_test)
-        predictions = self.top_model.predict(bottleneck_features)
+        if full_model.layers is None:
+            build_full_model()
+        predictions = self.full_model.predict(x_test)
         return predictions
 
     def map_predictions(self, predictions, labels_map, thresholds):
