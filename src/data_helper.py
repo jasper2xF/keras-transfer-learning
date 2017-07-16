@@ -9,7 +9,6 @@ from itertools import chain
 from multiprocessing import cpu_count
 from concurrent.futures import ThreadPoolExecutor
 
-
 def get_jpeg_data_files_paths():
     """
     Returns the input file folders path
@@ -150,6 +149,24 @@ def _get_test_matrices(test_set_folder, img_resize, process_count):
             x_test_filename.append(file_name)
     return [x_test, x_test_filename]
 
+
+def load_data(data_dir):
+    """Loads previously processed and stored data."""
+    x_input = np.load(os.path.join(data_dir, "x_input.npy"))
+    y_input = np.load(os.path.join(data_dir, "y_input.npy"))
+    # load numpy array and get dict
+    y_map = np.load(os.path.join(data_dir, "y_map.npy")).item()
+    return x_input, y_input, y_map
+
+
+def store_data(data_dir, x_input, y_input, y_map):
+    """Stores data through np.save for future use."""
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
+    np.save(os.path.join(data_dir, "x_input.npy"), x_input)
+    np.save(os.path.join(data_dir, "y_input.npy"), y_input)
+    np.save(os.path.join(data_dir, "y_map.npy"), y_map)
+    return None
 
 def preprocess_train_data(train_set_folder, train_csv_file, img_resize=(32, 32), process_count=cpu_count()):
     """

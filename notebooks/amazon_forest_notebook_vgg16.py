@@ -188,9 +188,15 @@ img_resize = (img_size, img_size) # The resize size of each image
 
 # <codecell>
 
-x_input, y_input, y_map = data_helper.preprocess_train_data(train_jpeg_dir, train_csv_file, img_resize)
-# Free up all available memory space after this heavy operation
-gc.collect();
+data_dir_base = "/media/jasper/Data/ml-data/planet_ama_kg/preprocessing/train/"
+data_dir = os.path.join(data_dir_base, str(img_size))
+if os.path.exists(data_dir):
+    x_input, y_input, y_map = data_helper.load_data(data_dir)
+else:
+    x_input, y_input, y_map = data_helper.preprocess_train_data(train_jpeg_dir, train_csv_file, img_resize)
+    data_helper.store_data(data_dir, x_input, y_input, y_map)
+    # Free up all available memory space after this heavy operation
+    gc.collect();
 
 # <codecell>
 
