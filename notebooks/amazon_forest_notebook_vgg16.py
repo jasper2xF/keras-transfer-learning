@@ -43,6 +43,8 @@ import data_helper
 from keras_helper import VGG16DenseRetrainer
 from kaggle_data.downloader import KaggleDataDownloader
 
+import time
+
 %matplotlib inline
 %config InlineBackend.figure_format = 'retina'
 
@@ -166,7 +168,8 @@ for i, (image_name, label) in enumerate(zip(images_title, labels_set)):
 
 # <codecell>
 
-img_resize = (48, 48) # The resize size of each image
+img_size = 64
+img_resize = (img_size, img_size) # The resize size of each image
 
 # <markdowncell>
 
@@ -185,14 +188,14 @@ img_resize = (48, 48) # The resize size of each image
 
 # <codecell>
 
-x_train, y_train, y_map = data_helper.preprocess_train_data(train_jpeg_dir, train_csv_file, img_resize)
+x_input, y_input, y_map = data_helper.preprocess_train_data(train_jpeg_dir, train_csv_file, img_resize)
 # Free up all available memory space after this heavy operation
 gc.collect();
 
 # <codecell>
 
-print("x_train shape: {}".format(x_train.shape))
-print("y_train shape: {}".format(y_train.shape))
+print("x_input shape: {}".format(x_input.shape))
+print("y_input shape: {}".format(y_input.shape))
 y_map
 
 # <markdowncell>
@@ -231,22 +234,33 @@ batch_size = 128
 
 # <codecell>
 
+n_classes = y_input.shape[1]
+from sklearn.model_selection import train_test_split
+
+X_train, X_valid, y_train, y_valid = train_test_split(x_input, y_input,
+                                                              test_size=validation_split_size)
+ 
+
+# <codecell>
+
 # Reload keras_helper for VGG16DenseRetrainer class changes
 #from keras_helper import VGG16DenseRetrainer
 #from importlib import reload
 #import keras_helper
 #reload(keras_helper)
-#rom keras_helper import VGG16DenseRetrainer
+#from keras_helper import VGG16DenseRetrainer
 
 # <codecell>
 
-n_classes = y_train.shape[1]
-
+   
 classifier = VGG16DenseRetrainer()
 print("Classifier initialized.")
 classifier.build_vgg16(img_resize, 3, n_classes)
 print("Vgg16 built.")
-classifier.predict_bottleneck_features(x_train, y_train, validation_split_size=validation_split_size)
+classifier.predict_bottleneck_features(X_train, X_valid, validation_split_size=validation_split_size)
+del X_train
+del X_valid
+gc.collect()
 print("Vgg16 bottleneck features calculated.")
 
 classifier.build_top_model(n_classes)
@@ -255,15 +269,20 @@ print("Top built, ready to train.")
 train_losses, val_losses = [], []
 #epochs_arr = [10, 5, 5]
 #learn_rates = [0.001, 0.0001, 0.00001]
-epochs_arr = [20]
+epochs_arr = [50]
+#epochs_arr = [1]
 learn_rates = [0.00001]
+start = time.time()
 for learn_rate, epochs in zip(learn_rates, epochs_arr):
-    tmp_train_losses, tmp_val_losses, fbeta_score = classifier.train_top_model(x_train, y_train, learn_rate, epochs,
+    tmp_train_losses, tmp_val_losses, fbeta_score = classifier.train_top_model(y_train, y_valid, learn_rate, epochs,
                                                                            batch_size, validation_split_size=validation_split_size, 
                                                                            train_callbacks=[checkpoint_top])
     train_losses += tmp_train_losses
     val_losses += tmp_val_losses
     
+end = time.time()
+t_epoch = float(end-start)/sum(epochs_arr)
+print("Training time [s/epoch]: " + str(t_epoch))
 
 # <markdowncell>
 
@@ -298,37 +317,72 @@ plt.legend();
 
 # <codecell>
 
+fbeta_score = classifier.get_fbeta_score_valid(y_valid)
 fbeta_score
 
 # <markdowncell>
 
-# ## Retrain full model
+# ## Fine-tune full model
 # 
 # Now we retrain the top model together with the last convolutional layer from the VGG16 model
 
 # <codecell>
 
-classifier.build_full_model()
+X_train, X_valid, y_train, y_valid = train_test_split(x_input, y_input,
+                                                              test_size=validation_split_size)
 
+# <codecell>
+
+# Reload keras_helper for VGG16DenseRetrainer class changes
+#from keras_helper import VGG16DenseRetrainer
+#from importlib import reload
+#import keras_helper
+#reload(keras_helper)
+#from keras_helper import VGG16DenseRetrainer
+
+# Reload classifier models after class change
+#classifier = VGG16DenseRetrainer()
+#classifier.build_vgg16(img_resize, 3, n_classes)
+#classifier.build_top_model(n_classes)
+#classifier.load_top_weights(best_top_weights_path)
+#print("Reloaded class and model.")
+
+# <codecell>
+
+n_untrained_layers = 14
+
+init_top_weights = classifier.split_fine_tuning_models(n_untrained_layers)
+split_layer_name = classifier.base_model.layers[n_untrained_layers].name
+print("Splitting at: " + split_layer_name)
+classifier.predict_bottleneck_features(X_train, X_valid, validation_split_size=validation_split_size)
+del X_train
+del X_valid
+gc.collect()
+print("Bottleneck features calculated.")
 
 
 train_losses_full, val_losses_full = [], []
-epochs_arr = [50]#,300]
-learn_rates = [1e-3]#,1e-4]
-n_untrained_layers = 15
-import time
+epochs_arr = [50, 100, 300, 500]
+#epochs_arr = [1, 1, 1, 1]
+learn_rates = [0.01, 0.001, 0.0001, 0.00001]
+momentum_arr = [0.9, 0.9, 0.9, 0.9]
 
 # TODO: Implement and use bottleneck features for any n_untrained_layers
 #classifier.predict_bottleneck_features(x_train, y_train, validation_split_size, n_untrained_layers)
 
 start = time.time()
-for learn_rate, epochs in zip(learn_rates, epochs_arr):
-    tmp_train_losses, tmp_val_losses, fbeta_score = classifier.fine_tune_full_model(x_train, y_train, learn_rate, epochs,
+for learn_rate, epochs, momentum in zip(learn_rates, epochs_arr, momentum_arr):
+    classifier.set_top_weights(init_top_weights)
+    tmp_train_losses, tmp_val_losses, fbeta_score = classifier.fine_tune_full_model(y_train, y_valid, learn_rate, momentum, epochs,
                                    batch_size, validation_split_size, 
-                                   n_untrained_layers, train_callbacks=[checkpoint_full])
+                                   train_callbacks=[checkpoint_full])
     
     train_losses_full += tmp_train_losses
     val_losses_full += tmp_val_losses
+    print("learn_rate : " + str(learn_rate))
+    print("epochs : " + str(epochs))
+    print("momentum : " + str(momentum))
+    print("fbeta_score : " + str(fbeta_score))
 end = time.time()
 t_epoch = float(end-start)/sum(epochs_arr)
 print("Training time [s/epoch]: " + str(t_epoch))
@@ -343,8 +397,7 @@ print("Training time [s/epoch]: " + str(t_epoch))
 
 # <codecell>
 
-#classifier.load_full_weights(best_full_weights_path)
-#print("Weights loaded")
+classifier.load_top_weights(best_full_weights_path)
 
 # <markdowncell>
 
@@ -366,6 +419,7 @@ plt.legend();
 
 # <codecell>
 
+fbeta_score = classifier.get_fbeta_score_valid(y_valid)
 fbeta_score
 
 # <markdowncell>
@@ -374,7 +428,7 @@ fbeta_score
 
 # <codecell>
 
-del x_train, y_train
+del x_input, y_input
 gc.collect()
 
 x_test, x_test_filename = data_helper.preprocess_test_data(test_jpeg_dir, img_resize)

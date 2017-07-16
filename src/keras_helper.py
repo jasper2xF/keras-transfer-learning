@@ -6,7 +6,7 @@ from sklearn.metrics import fbeta_score
 from sklearn.model_selection import train_test_split
 
 from keras.models import Sequential
-from keras.layers import Activation, Dense, Dropout, Flatten
+from keras.layers import Input, Activation, Dense, Dropout, Flatten
 from keras.layers import Conv2D, MaxPooling2D, BatchNormalization, ZeroPadding2D
 from keras.optimizers import Adam
 from keras.callbacks import Callback, EarlyStopping
@@ -126,10 +126,34 @@ class AmazonKerasClassifier:
         backend.clear_session()
 
 class VGG16DenseRetrainer:
+    """Class for retraining VGG16 architecture.
+
+    Supports retraining dense top_model:
+        classifier = VGG16DenseRetrainer(...)
+        classifier.build_vgg16(...)
+        classifier.predict_bottleneck_features(...)
+        classifier.build_top_model(...)
+        classifier.train_top_model(...)
+    Supports retraining dense top_model with layers of VGG16 architecture. Note that this requires training vanilla
+    dense top_model first:
+        *dense top model steps*
+        classifier.split_fine_tuning_models(...)
+        classifier.predict_bottleneck_features(...)
+        classifier.fine_tune_full_model(...)
+    When training over multiple parameters in loop make sure to load original top_model weights stored by
+    build_full_model(...) model call:
+        *dense top model steps*
+        init_top_weights = classifier.split_fine_tuning_models(...)
+        classifier.predict_bottleneck_features(...)
+        for param in params:
+            classifier.set_top_model_weights(init_top_weights)
+            classifier.fine_tune_full_model(...)
+
+    """
     def __init__(self, path_bottleneck_feat_trn='bottleneck_features_train.npy',
                  path_bottleneck_feat_val='bottleneck_features_validation.npy'):
         self.losses = []
-        self.bottleneck_model = None
+        self.base_model = None
         self.top_model = Sequential()
         self.full_model = None
         self.path_bottleneck_feat_trn = path_bottleneck_feat_trn
@@ -141,69 +165,51 @@ class VGG16DenseRetrainer:
         img_width = img_size[0]
         img_height = img_size[1]
 
-        self.bottleneck_model = VGG16(include_top=False, weights='imagenet',
+        self.base_model = VGG16(include_top=False, weights='imagenet',
               input_tensor=None, input_shape=(img_width, img_height, img_channels),
               pooling=None,
               classes=n_classes)
-
-    def load_vgg16_weights(self, filepath, by_name=False):
-        if h5py is None:
-            raise ImportError('`load_weights` requires h5py.')
-        f = h5py.File(filepath, mode='r')
-        if 'layer_names' not in f.attrs and 'model_weights' in f:
-            f = f['model_weights']
-
-        # Legacy support
-        layers = self.bottleneck_model.layers
-        if by_name:
-            topology.load_weights_from_hdf5_group_by_name(f, layers)
-        else:
-            topology.load_weights_from_hdf5_group(f, layers)
-        if hasattr(f, 'close'):
-            f.close()
 
     def load_vgg16_weights_old(self, weights_path):
         """Load vgg16 weights into bottleneck model."""
         assert os.path.exists(weights_path), 'Model weights not found (see "weights_path" variable in script).'
         f = h5py.File(weights_path)
         for k in range(f.attrs['nb_layers']):
-            if k >= len(self.bottleneck_model.layers):
+            if k >= len(self.base_model.layers):
                 # we don't look at the last (fully-connected) layers in the savefile
                 break
             g = f['layer_{}'.format(k)]
             weights = [g['param_{}'.format(p)] for p in range(g.attrs['nb_params'])]
-            self.bottleneck_model.layers[k].set_weights(weights)
+            self.base_model.layers[k].set_weights(weights)
         f.close()
         print('Model loaded.')
 
-    def predict_bottleneck_features(self, x_train, y_train, validation_split_size=0.2):
+    def predict_bottleneck_features(self, X_train, X_valid, validation_split_size=0.2):
         """Runs input through vgg16 architecture to generate and save bottleneck features."""
-        X_train, X_valid, _, _ = train_test_split(x_train, y_train,
-                                                              test_size=validation_split_size)
-
-        self.bottleneck_feat_trn = self.bottleneck_model.predict(X_train)
+        self.bottleneck_feat_trn = self.base_model.predict(X_train)
         np.save(open(self.path_bottleneck_feat_trn, 'wb'), self.bottleneck_feat_trn)
 
-        self.bottleneck_feat_val = self.bottleneck_model.predict(X_valid)
+        self.bottleneck_feat_val = self.base_model.predict(X_valid)
         np.save(open(self.path_bottleneck_feat_val, 'wb'), self.bottleneck_feat_val)
 
     def _get_fbeta_score(self, classifier, X_valid, y_valid):
         p_valid = classifier.predict(X_valid)
         return fbeta_score(y_valid, np.array(p_valid) > 0.2, beta=2, average='samples')
 
-    def build_top_model(self, n_classes):
-        self.top_model.add(Flatten(input_shape=self.bottleneck_model.output_shape[1:]))
-        self.top_model.add(Dense(256, activation='relu'))
-        self.top_model.add(Dropout(0.5))
+    def get_fbeta_score_valid(self, y_valid):
+        fbeta_score = self._get_fbeta_score(self.top_model, self.bottleneck_feat_val, y_valid)
+        return fbeta_score
+
+    def build_top_model(self, n_classes, n_dense=256, dropout_rate=0.3):
+        self.top_model.add(Flatten(input_shape=self.base_model.output_shape[1:]))
+        self.top_model.add(Dense(n_dense, activation='relu'))
+        self.top_model.add(Dropout(dropout_rate))
         self.top_model.add(Dense(n_classes, activation='sigmoid'))
 
-    def train_top_model(self, x_train, y_train, learn_rate=0.001, epoch=5, batch_size=128, validation_split_size=0.2,
+    def train_top_model(self, y_train, y_valid, learn_rate=0.001, epoch=5, batch_size=128, validation_split_size=0.2,
                     train_callbacks=()):
         """Builds and trains top model."""
         history = LossHistory()
-
-        _, _, y_train, y_valid = train_test_split(x_train, y_train,
-                                                              test_size=validation_split_size)
 
         opt = Adam(lr=learn_rate)
 
@@ -227,14 +233,59 @@ class VGG16DenseRetrainer:
     def load_top_weights(self, weight_file_path):
         self.top_model.load_weights(weight_file_path)
 
-    def load_full_weights(self, weight_file_path):
-        self.full_model.load_weights(weight_file_path)
+    def set_top_weights(self, weights):
+        self.top_model.set_weights(weights)
 
-    def build_full_model(self):
-        self.full_model = Model(input=self.bottleneck_model.input, output=self.top_model(self.bottleneck_model.output))
-        #Model(inputs=self.bottleneck_model.input, outputs=self.top_model.output)
+    def get_top_weights(self):
+        return self.top_model.get_weights()
 
-    def fine_tune_full_model(self, x_train, y_train, learn_rate=0.001, epoch=5, batch_size=128, validation_split_size=0.2,
+    #def load_full_weights(self, weight_file_path):
+    #    self.full_model.load_weights(weight_file_path)
+
+    def split_fine_tuning_models(self, split_layer_id):
+        """Splits full model at split_layer_id and returns new top_model weights.
+
+        Full model consists of previous base_model plus top_model. New base_model goes until split_layer_id. New
+        top_model starts at split_layer_id. The top_model weights are stored and returned as starting point for future
+        retraining.
+        """
+        # Create full model for splitting
+        full_model = Model(input=self.base_model.input, output=self.top_model(self.base_model.output))
+
+        # Create new base model from input to split layer
+        self.base_model = Model(input=full_model.input, output=full_model.layers[split_layer_id].output)
+
+        # Create new top model from base model output to previous top model end
+        top_model_input = Input(shape=self.base_model.output_shape[1:])
+        x = top_model_input
+        for layer in full_model.layers[(split_layer_id + 1):]:
+            x = layer(x)
+        self.top_model = Model(top_model_input, x)
+
+        return self.top_model.get_weights()
+
+    def fine_tune_full_model(self, y_train, y_valid, learn_rate=0.001, momentum=0.9, epoch=5, batch_size=128, validation_split_size=0.2,
+                             train_callbacks=()):
+        """Retrain top model and last vgg16 conv block with light weight updates."""
+
+        history = LossHistory()
+
+        self.top_model.compile(loss='binary_crossentropy',
+                      optimizer=optimizers.SGD(lr=learn_rate, momentum=momentum),
+                      metrics=['accuracy'])
+
+        # early stopping will auto-stop training process if model stops learning after 3 epochs
+        earlyStopping = EarlyStopping(monitor='val_loss', patience=3, verbose=0, mode='auto')
+        self.top_model.fit(self.bottleneck_feat_trn, y_train,
+                           epochs=epoch,
+                           batch_size=batch_size,
+                           verbose=1,
+                           validation_data=(self.bottleneck_feat_val, y_valid),
+                           callbacks=[history, *train_callbacks, earlyStopping])
+        fbeta_score = self._get_fbeta_score(self.top_model, self.bottleneck_feat_val, y_valid)
+        return [history.train_losses, history.val_losses, fbeta_score]
+
+    def fine_tune_full_model_old(self, x_train, y_train, learn_rate=0.001, epoch=5, batch_size=128, validation_split_size=0.2,
                              n_untrained_layers=17, train_callbacks=()):
         """Retrain top model and last vgg16 conv block with light weight updates."""
         for layer in self.full_model.layers[:n_untrained_layers]:
@@ -262,9 +313,8 @@ class VGG16DenseRetrainer:
         return [history.train_losses, history.val_losses, fbeta_score]
 
     def predict(self, x_test):
-        if full_model.layers is None:
-            build_full_model()
-        predictions = self.full_model.predict(x_test)
+        bottleneck_features = self.base_model.predict(x_test)
+        predictions = self.top_model.predict(bottleneck_features)
         return predictions
 
     def map_predictions(self, predictions, labels_map, thresholds):
