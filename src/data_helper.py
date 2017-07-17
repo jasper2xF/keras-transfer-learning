@@ -168,6 +168,21 @@ def store_data(data_dir, x_input, y_input, y_map):
     np.save(os.path.join(data_dir, "y_map.npy"), y_map)
     return None
 
+def load_test_data(data_dir):
+    """Loads previously processed and stored data."""
+    x_test = np.load(os.path.join(data_dir, "x_test.npy"))
+    x_test_filename = np.load(os.path.join(data_dir, "x_test_filename.npy"))
+    return x_test, x_test_filename
+
+
+def store_test_data(data_dir, x_test, x_test_filename):
+    """Stores data through np.save for future use."""
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
+    np.save(os.path.join(data_dir, "x_test.npy"), x_test)
+    np.save(os.path.join(data_dir, "x_test_filename.npy"), x_test_filename)
+    return None
+
 def preprocess_train_data(train_set_folder, train_csv_file, img_resize=(32, 32), process_count=cpu_count()):
     """
     Transform the train images to ready to use data for the CNN 
