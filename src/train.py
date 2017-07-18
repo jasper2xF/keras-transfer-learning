@@ -25,6 +25,8 @@ from keras_helper import VGG16DenseRetrainer
 from kaggle_data.downloader import KaggleDataDownloader
 from keras.callbacks import ModelCheckpoint
 
+from sklearn.metrics import fbeta_score
+
 import logging
 import time
 
@@ -45,17 +47,9 @@ train_data_dir = "/media/jasper/Data/ml-data/planet_ama_kg/preprocessing/train/"
 test_data_dir = "/media/jasper/Data/ml-data/planet_ama_kg/preprocessing/test/"
 
 
-def get_data():
-    # Dataset parameters
-    competition_name = "planet-understanding-the-amazon-from-space"
-
-    train, train_u = "train-jpg.tar.7z", "train-jpg.tar"
-    test, test_u = "test-jpg.tar.7z", "test-jpg.tar"
-    test_additional, test_additional_u = "test-jpg-additional.tar.7z", "test-jpg-additional.tar"
-    test_labels = "train_v2.csv.zip"
-    destination_path = "../input/"
-    is_datasets_present = False
-
+def get_data(competition_name, destination_path, is_datasets_present, test, test_additional, test_additional_u,
+             test_labels, test_u, train, train_u):
+    """Check whether competition data exists or download."""
     # If the folders already exists then the files may already be extracted
     # This is a bit hacky but it's sufficient for our needs
     datasets_path = data_helper.get_jpeg_data_files_paths()
@@ -105,38 +99,22 @@ def load_train_input(img_size):
     labels_set = set(labels_list)
     logger.info("There is {} unique labels including {}".format(len(labels_set), labels_set))
 
-    # # Image Resize
-    # Define the dimensions of the image data trained by the network. Due to memory constraints we can't load in the full
-    # size 256x256 jpg images. Recommended resized images could be 32x32, 64x64, or 128x128.
-
+    # Image Resize
     img_resize = (img_size, img_size)  # The resize size of each image
-
-    # # Data preprocessing
-    # Preprocess the data in order to fit it into the Keras model.
-    #
-    # Due to the hudge amount of memory the resulting matrices will take, the preprocessing will be splitted into several steps:
-    #     - Preprocess training data (images and labels) and train the neural net with it
-    #     - Delete the training data and call the gc to free up memory
-    #     - Preprocess the first testing set
-    #     - Predict the first testing set labels
-    #     - Delete the first testing set
-    #     - Preprocess the second testing set
-    #     - Predict the second testing set labels and append them to the first testing set
-    #     - Delete the second testing set
 
     data_dir = os.path.join(train_data_dir, str(img_size))
     if os.path.exists(data_dir):
-        x_input, y_input, y_map = data_helper.load_data(data_dir)
+        x_input, y_true, y_map = data_helper.load_data(data_dir)
     else:
-        x_input, y_input, y_map = data_helper.preprocess_train_data(train_jpeg_dir, train_csv_file, img_resize)
-        data_helper.store_data(data_dir, x_input, y_input, y_map)
+        x_input, y_true, y_map = data_helper.preprocess_train_data(train_jpeg_dir, train_csv_file, img_resize)
+        data_helper.store_data(data_dir, x_input, y_true, y_map)
         # Free up all available memory space after this heavy operation
         gc.collect()
 
     logger.debug("x_input shape: {}".format(x_input.shape))
-    logger.debug("y_input shape: {}".format(y_input.shape))
+    logger.debug("y_true shape: {}".format(y_true.shape))
     logger.debug("Label mapping: " + str(y_map))
-    return x_input, y_input, y_map
+    return x_input, y_true, y_map
 
 
 def load_test_input(img_size):
@@ -146,54 +124,55 @@ def load_test_input(img_size):
     data_dir = os.path.join(test_data_dir, str(img_size))
     if os.path.exists(data_dir):
         x_test, x_test_filename = data_helper.load_test_data(data_dir)
-        return x_test, x_test_filename
     else:
-        x_test, x_test_filename = data_helper.preprocess_test_datasets([test_jpeg_dir, test_jpeg_additional], img_resize)
+        x_test, x_test_filename = data_helper.preprocess_test_datasets([test_jpeg_dir, test_jpeg_additional],
+                                                                       img_resize)
         data_helper.store_test_data(data_dir, x_test, x_test_filename)
+        # Free up all available memory space after this heavy operation
         gc.collect()
 
     logger.debug("x_test shape: {}".format(x_test.shape))
-    logger.debug("x_test_filename shape: {}".format(x_test_filename.shape))
+    logger.debug("x_test_filename length: {}".format(len(x_test_filename)))
     return x_test, x_test_filename
 
 
-def fine_tune_vgg16(y_input, y_map, img_size, annealing, batch_size, best_full_weights_path, best_top_weights_path,
+def fine_tune_vgg16(x_input, y_true, img_size, annealing, batch_size, best_full_weights_path, best_top_weights_path,
                     fine_epochs_arr, fine_learn_rates, fine_momentum_arr, max_train_time_hrs, n_untrained_layers,
-                    top_epochs_arr, top_learn_rates, validation_split_sizex_input):
+                    top_epochs_arr, top_learn_rates, validation_split_size):
 
     # Create a checkpoint, for best model weights
     checkpoint_top = ModelCheckpoint(best_top_weights_path, monitor='val_acc', verbose=1, save_best_only=True)
     checkpoint_full = ModelCheckpoint(best_full_weights_path, monitor='val_acc', verbose=1, save_best_only=True)
 
-    classifier = train_top_model(img_size, batch_size, best_top_weights_path, checkpoint_top, top_epochs_arr, top_learn_rates,
-                                 validation_split_size, x_input, y_input)
+    classifier = train_top_model(img_size, batch_size, best_top_weights_path, checkpoint_top, top_epochs_arr,
+                                 top_learn_rates, validation_split_size, x_input, y_true)
 
     # ## Fine-tune full model
     #
     # Now we retrain the top model together with the last convolutional layer from the VGG16 model
     classifier = train_partial_vgg16(batch_size, best_full_weights_path, checkpoint_full, classifier, fine_epochs_arr,
-                        fine_learn_rates, fine_momentum_arr, max_train_time_hrs, n_untrained_layers,
-                        validation_split_size, x_input, y_input, annealing)
+                                     fine_learn_rates, fine_momentum_arr, max_train_time_hrs, n_untrained_layers,
+                                     validation_split_size, x_input, y_true, annealing)
 
     return classifier
 
 
-def load_fine_tuned_vgg16(img_resize, n_classes, n_untrained_layers, top_weights_path):
-    logger.info("Training dense top model.")
+def load_fine_tuned_vgg16(img_size, n_classes, n_untrained_layers, top_weights_path, fine_weights_path):
     classifier = VGG16DenseRetrainer()
-    logger.info("Classifier initialized.")
-    classifier.build_vgg16(img_resize, 3, n_classes)
-    classifier.split_fine_tuning_models(n_untrained_layers)
+    classifier.build_vgg16([img_size, img_size], 3, n_classes)
+    classifier.build_top_model(n_classes)
     classifier.load_top_weights(top_weights_path)
-
+    classifier.split_fine_tuning_models(n_untrained_layers)
+    classifier.load_top_weights(fine_weights_path)
+    logger.debug("Loaded VGG16 model.")
     return classifier
 
 
 def train_partial_vgg16(batch_size, best_full_weights_path, checkpoint_full, classifier, fine_epochs_arr,
                         fine_learn_rates, fine_momentum_arr, max_train_time_hrs, n_untrained_layers,
-                        validation_split_size, x_input, y_input, annealing):
+                        validation_split_size, x_input, y_true, annealing):
     max_train_time_secs = max_train_time_hrs * 60 * 60
-    X_train, X_valid, y_train, y_valid = train_test_split(x_input, y_input,
+    X_train, X_valid, y_train, y_valid = train_test_split(x_input, y_true,
                                                           test_size=validation_split_size)
     logger.info("Fine tuning top model and VGG16 layers.")
     logger.info("Will train for max " + str(float(max_train_time_secs) / 60) + " min.")
@@ -255,12 +234,12 @@ def train_partial_vgg16(batch_size, best_full_weights_path, checkpoint_full, cla
 
 
 def train_top_model(img_size, batch_size, best_top_weights_path, checkpoint_top, top_epochs_arr, top_learn_rates,
-                    validation_split_size, x_input, y_input):
+                    validation_split_size, x_input, y_true):
     img_resize = (img_size, img_size)
 
     # Define and Train model
-    n_classes = y_input.shape[1]
-    X_train, X_valid, y_train, y_valid = train_test_split(x_input, y_input,
+    n_classes = y_true.shape[1]
+    X_train, X_valid, y_train, y_valid = train_test_split(x_input, y_true,
                                                           test_size=validation_split_size)
     logger.info("Training dense top model.")
     classifier = VGG16DenseRetrainer()
@@ -316,11 +295,7 @@ def create_test_file(classifier, x_test, x_test_filename , y_map, classification
     logger.info("Predictions shape: {}\nFiles name shape: {}\n1st predictions entry:\n{}".format(predictions.shape,
                                                                                            x_test_filename.shape,
                                                                                            predictions[0]))
-    # Before mapping our predictions to their appropriate labels we need to figure out what threshold to take for each class.
-    #
-    # To do so we will take the median value of each classes.
 
-    # For now we'll just put all thresholds to 0.2
     thresholds = [classification_threshold] * len(y_map)
 
     # TODO complete
@@ -355,13 +330,34 @@ def create_test_file(classifier, x_test, x_test_filename , y_map, classification
     classifier.close()
 
 
-def main():
+def evaluate(classifier, x_input, y_true, threshold=None):
+    """Call f2 on prediction of input and gold labels."""
+    prediction = classifier.predict(x_input)
+    if threshold is None:
+        threshold = classifier.classification_threshold
+        if threshold is None:
+            threshold = 0.2
+    f2 = fbeta_score(y_true, np.array(prediction) > threshold, beta=2, average='samples')
+    return f2, threshold
 
-    img_size = 48
+def main():
+    run_name = ""
+    # Dataset parameters
+    competition_name = "planet-understanding-the-amazon-from-space"
+    train, train_u = "train-jpg.tar.7z", "train-jpg.tar"
+    test, test_u = "test-jpg.tar.7z", "test-jpg.tar"
+    test_additional, test_additional_u = "test-jpg-additional.tar.7z", "test-jpg-additional.tar"
+    test_labels = "train_v2.csv.zip"
+    destination_path = "../input/"
+    is_datasets_present = False
+
+    # Define the dimensions of the image data trained by the network. Due to memory constraints we can't load in the
+    # full size 256x256 jpg images. Recommended resized images could be 32x32, 64x64, or 128x128.
+    img_size = 96
 
     # Weights parameters
-    best_top_weights_path = "weights_top_best.hdf5"
-    best_full_weights_path = "weights_full_best.hdf5"
+    best_top_weights_path = run_name + "weights_top_best.hdf5"
+    best_full_weights_path = run_name + "weights_full_best.hdf5"
     # Training parameters
     validation_split_size = 0.2
     batch_size = 128
@@ -379,27 +375,44 @@ def main():
     # fine_epochs_arr = [1, 1, 1, 1]
     fine_learn_rates = [0.01, 0.001]  # , 0.0001, 0.00001]
     fine_momentum_arr = [0.9, 0.9]  # , 0.9, 0.9]
+    annealing = True
 
-    train = False
+    #model loading parameters
+    n_classes = 17
+
+    train = True
     load = False
+    eval = False
     generate_test = True
 
+    if train or eval or generate_test:
+        x_input, y_true, y_map = load_train_input(img_size)
+
     if train:
-        get_data()
-        x_input, y_input, y_map = load_train_input(img_size)
-        classifier = fine_tune_vgg16(x_input, y_input, y_map, img_size, annealing, batch_size, best_full_weights_path, best_top_weights_path,
-                        fine_epochs_arr, fine_learn_rates, fine_momentum_arr, max_train_time_hrs, n_untrained_layers,
-                        top_epochs_arr, top_learn_rates, validation_split_sizex_input)
+        get_data(competition_name, destination_path, is_datasets_present, test, test_additional, test_additional_u,
+                 test_labels, test_u, train, train_u)
+        classifier = fine_tune_vgg16(x_input, y_true, img_size, annealing, batch_size, best_full_weights_path,
+                                     best_top_weights_path, fine_epochs_arr, fine_learn_rates, fine_momentum_arr,
+                                     max_train_time_hrs, n_untrained_layers, top_epochs_arr, top_learn_rates,
+                                     validation_split_size)
         del x_input
-        del y_input
+        del y_true
         gc.collect()
 
     if load:
-        classifier = load_fine_tuned_vgg16(img_resize, n_classes, n_untrained_layers, best_full_weights_path)
+        classifier = load_fine_tuned_vgg16(img_size, n_classes, n_untrained_layers, best_top_weights_path, best_full_weights_path)
+
+    if eval:
+        f2, threshold = evaluate(classifier, x_input, y_true)
+        logger.info("WARNING: This eval is a rough sanity check, it will include training data.")
+        logger.info("F2(c_thresh="+str(threshold)+"): " + str(f2))
 
     if generate_test:
         x_test, x_test_filename = load_test_input(img_size)
-        #create_test_file(classifier, x_test, x_test_filename, y_map)
+        del x_input
+        del y_true
+        gc.collect()
+        create_test_file(classifier, x_test, x_test_filename, y_map)
 
 
 if __name__ == "__main__":
