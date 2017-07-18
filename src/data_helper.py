@@ -1,4 +1,5 @@
 import os
+
 import sys
 import gc
 import numpy as np
@@ -214,6 +215,29 @@ def preprocess_test_data(test_set_folder, img_resize=(32, 32), process_count=cpu
         x_test_filename: The files name of each test images in the same order as the x_test arrays
     """
     x_test, x_test_filename = _get_test_matrices(test_set_folder, img_resize, process_count)
+    ret = [np.array(x_test), x_test_filename]
+    print("Done. Size consumed by arrays {} mb".format(ret[0].nbytes / 1024 / 1024))
+    return ret
+
+
+def preprocess_test_datasets(test_set_folders, img_resize=(32, 32), process_count=cpu_count()):
+    """
+    Transform the images to ready to use data for the CNN
+    :param test_set_folder: the folder containing the images for testing
+    :param img_resize: the standard size you want to have on images when transformed to matrices
+    :param process_count: the number of process you want to use to preprocess the data.
+        If you run into issues, lower this number. Its default value is equal to the number of core of your CPU
+    :return: The images matrices and labels as [x_test, x_test_filename]
+        x_test: The X test values as a numpy array
+        x_test_filename: The files name of each test images in the same order as the x_test arrays
+    """
+    x_test = []
+    x_test_filename = []
+    for test_set_folder in test_set_folders:
+        x_test_tmp, x_test_filename_tmp = _get_test_matrices(test_set_folder, img_resize, process_count)
+        x_test.extend(x_test_tmp)
+        x_test_filename.extend(x_test_filename_tmp)
+
     ret = [np.array(x_test), x_test_filename]
     print("Done. Size consumed by arrays {} mb".format(ret[0].nbytes / 1024 / 1024))
     return ret
