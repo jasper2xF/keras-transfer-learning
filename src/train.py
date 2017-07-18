@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 
 import data_helper
-from keras_helper import VGG16DenseRetrainer
+from keras_transfer_learning import TransferModel
 from kaggle_data.downloader import KaggleDataDownloader
 from keras.callbacks import ModelCheckpoint
 
@@ -158,7 +158,7 @@ def fine_tune_vgg16(x_input, y_true, img_size, annealing, batch_size, best_full_
 
 
 def load_fine_tuned_vgg16(img_size, n_classes, n_untrained_layers, top_weights_path, fine_weights_path):
-    classifier = VGG16DenseRetrainer()
+    classifier = TransferModel()
     classifier.build_vgg16([img_size, img_size], 3, n_classes)
     classifier.build_top_model(n_classes)
     classifier.load_top_weights(top_weights_path)
@@ -242,7 +242,7 @@ def train_top_model(img_size, batch_size, best_top_weights_path, checkpoint_top,
     X_train, X_valid, y_train, y_valid = train_test_split(x_input, y_true,
                                                           test_size=validation_split_size)
     logger.info("Training dense top model.")
-    classifier = VGG16DenseRetrainer()
+    classifier = TransferModel()
     logger.info("Classifier initialized.")
     classifier.build_vgg16(img_resize, 3, n_classes)
     logger.info("Vgg16 built.")
@@ -353,7 +353,7 @@ def main():
 
     # Define the dimensions of the image data trained by the network. Due to memory constraints we can't load in the
     # full size 256x256 jpg images. Recommended resized images could be 32x32, 64x64, or 128x128.
-    img_size = 96
+    img_size = 64
 
     # Weights parameters
     best_top_weights_path = run_name + "weights_top_best.hdf5"
