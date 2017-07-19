@@ -12,7 +12,10 @@ from keras.optimizers import Adam
 from keras.callbacks import Callback, EarlyStopping
 from keras import backend
 from keras.engine import topology
+from keras.applications.resnet50 import ResNet50
 from keras.applications.vgg16 import VGG16
+from keras.applications.vgg19 import VGG19
+from keras.applications.inception_v3 import InceptionV3
 from keras.models import Model
 from keras import optimizers
 
@@ -69,6 +72,10 @@ class TransferModel:
         self.classification_threshold = 0.2
 
     def build_vgg16(self, img_size, img_channels, n_classes):
+        """VGG16 model, with weights pre-trained on ImageNet.
+
+        Width and height should be no smaller than 48.
+        """
         img_width = img_size[0]
         img_height = img_size[1]
 
@@ -77,19 +84,44 @@ class TransferModel:
               pooling=None,
               classes=n_classes)
 
-    def load_vgg16_weights_old(self, weights_path):
-        """Load vgg16 weights into bottleneck model."""
-        assert os.path.exists(weights_path), 'Model weights not found (see "weights_path" variable in script).'
-        f = h5py.File(weights_path)
-        for k in range(f.attrs['nb_layers']):
-            if k >= len(self.base_model.layers):
-                # we don't look at the last (fully-connected) layers in the savefile
-                break
-            g = f['layer_{}'.format(k)]
-            weights = [g['param_{}'.format(p)] for p in range(g.attrs['nb_params'])]
-            self.base_model.layers[k].set_weights(weights)
-        f.close()
-        print('Model loaded.')
+    def build_vgg19(self, img_size, img_channels, n_classes):
+        """VGG19 model, with weights pre-trained on ImageNet.
+
+        Width and height should be no smaller than 48.
+        """
+        img_width = img_size[0]
+        img_height = img_size[1]
+
+        self.base_model = VGG19(include_top=False, weights='imagenet',
+              input_tensor=None, input_shape=(img_width, img_height, img_channels),
+              pooling=None,
+              classes=n_classes)
+
+    def build_resnet50(self, img_size, img_channels, n_classes):
+        """ResNet50 model, with weights pre-trained on ImageNet.
+
+        Width and height should be no smaller than 197.
+        """
+        img_width = img_size[0]
+        img_height = img_size[1]
+        #width and height should be no smaller than 71
+        self.base_model = ResNet50(include_top=False, weights='imagenet',
+                                input_tensor=None, input_shape=(img_width, img_height, img_channels),
+                                pooling=None,
+                                classes=n_classes)
+
+    def build_inceptionv3(self, img_size, img_channels, n_classes):
+        """Inception V3 model, with weights pre-trained on ImageNet.
+
+        Width and height should be no smaller than 13
+        """
+        img_width = img_size[0]
+        img_height = img_size[1]
+        # width and height should be no smaller than 71
+        self.base_model = InceptionV3(include_top=False, weights='imagenet',
+                                   input_tensor=None, input_shape=(img_width, img_height, img_channels),
+                                   pooling=None,
+                                   classes=n_classes)
 
     def predict_bottleneck_features(self, X_train, X_valid, validation_split_size=0.2):
         """Runs input through vgg16 architecture to generate and save bottleneck features."""
