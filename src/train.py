@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 """Training script for planet amazon deforestation kaggle."""
 import sys
+import matplotlib
+matplotlib.use('agg')
+import matplotlib.pyplot as plt
 
 sys.path.append('../src')
 sys.path.append('../tests')
@@ -17,8 +20,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import tensorflow as tf
-import matplotlib.pyplot as plt
-import matplotlib.image as mpimg
+
 
 import data_helper
 from keras_transfer_learning import TransferModel
@@ -139,21 +141,23 @@ def load_test_input(img_size):
 def fine_tune_vgg16(x_input, y_true, img_size, annealing, batch_size, best_full_weights_path, best_top_weights_path,
                     fine_epochs_arr, fine_learn_rates, fine_momentum_arr, max_train_time_hrs, n_untrained_layers,
                     top_epochs_arr, top_learn_rates, validation_split_size):
+    X_train, X_valid, y_train, y_valid = train_test_split(x_input, y_true,
+                                                          test_size=validation_split_size)
 
-    # Create a checkpoint, for best model weights
-    checkpoint_top = ModelCheckpoint(best_top_weights_path, monitor='val_acc', verbose=1, save_best_only=True)
-    checkpoint_full = ModelCheckpoint(best_full_weights_path, monitor='val_acc', verbose=1, save_best_only=True)
-
-    classifier = train_top_model(img_size, batch_size, best_top_weights_path, checkpoint_top, top_epochs_arr,
-                                 top_learn_rates, validation_split_size, x_input, y_true)
+    classifier = train_top_model(img_size, batch_size, best_top_weights_path, top_epochs_arr,
+                                 top_learn_rates, validation_split_size, X_train, X_valid, y_train, y_valid)
 
     # ## Fine-tune full model
     #
     # Now we retrain the top model together with the last convolutional layer from the VGG16 model
-    classifier = train_partial_vgg16(batch_size, best_full_weights_path, checkpoint_full, classifier, fine_epochs_arr,
+    classifier = train_partial_vgg16(batch_size, best_full_weights_path, classifier, fine_epochs_arr,
                                      fine_learn_rates, fine_momentum_arr, max_train_time_hrs, n_untrained_layers,
-                                     validation_split_size, x_input, y_true, annealing)
-
+                                     validation_split_size, X_train, X_valid, y_train, y_valid, annealing)
+    del X_train
+    del X_valid
+    del y_train
+    del y_valid
+    gc.collect()
     return classifier
 
 
@@ -168,27 +172,38 @@ def load_fine_tuned_vgg16(img_size, n_classes, n_untrained_layers, top_weights_p
     return classifier
 
 
-def train_partial_vgg16(batch_size, best_full_weights_path, checkpoint_full, classifier, fine_epochs_arr,
+def train_partial_vgg16(batch_size, best_full_weights_path, classifier, fine_epochs_arr,
                         fine_learn_rates, fine_momentum_arr, max_train_time_hrs, n_untrained_layers,
-                        validation_split_size, x_input, y_true, annealing):
+                        validation_split_size, X_train, X_valid, y_train, y_valid, annealing):
+
+    # Create a checkpoint, for best model weights
+    checkpoint_full = ModelCheckpoint(best_full_weights_path, monitor='val_acc', verbose=1, save_best_only=True)
+
     max_train_time_secs = max_train_time_hrs * 60 * 60
-    X_train, X_valid, y_train, y_valid = train_test_split(x_input, y_true,
-                                                          test_size=validation_split_size)
+
     logger.info("Fine tuning top model and VGG16 layers.")
     logger.info("Will train for max " + str(float(max_train_time_secs) / 60) + " min.")
     init_top_weights = classifier.split_fine_tuning_models(n_untrained_layers)
     split_layer_name = classifier.base_model.layers[n_untrained_layers].name
     logger.info("Splitting at: " + split_layer_name)
     classifier.predict_bottleneck_features(X_train, X_valid, validation_split_size=validation_split_size)
-    del X_train
-    del X_valid
-    gc.collect()
+
     logger.info("Bottleneck features calculated.")
     train_losses_full, val_losses_full = [], []
     start = time.time()
+    first_flag = True
     for learn_rate, epochs, momentum in zip(fine_learn_rates, fine_epochs_arr, fine_momentum_arr):
         if not annealing:
+            #reload init weights for new experiment run
             classifier.set_top_weights(init_top_weights)
+        else:
+            if not first_flag:
+                #reload best weights from previous run for new annealing run
+                classifier.load_top_weights(best_full_weights_path)
+            else:
+                #first annealing run
+                first_flag = False
+
         tmp_train_losses, tmp_val_losses, fbeta_score = classifier.fine_tune_full_model(y_train, y_valid, learn_rate,
                                                                                         momentum, epochs,
                                                                                         batch_size,
@@ -225,7 +240,11 @@ def train_partial_vgg16(batch_size, best_full_weights_path, checkpoint_full, cla
     # plt.legend();
     # Store losses
     np.save("fine_train_losses.npy", train_losses_full)
-    np.save("fine_tval_losses.npy", val_losses_full)
+    np.save("fine_val_losses.npy", val_losses_full)
+    plt.plot(train_losses_full, label='Training loss')
+    plt.plot(val_losses_full, label='Validation loss')
+    plt.legend()
+    plt.savefig('fine_loss.png')
     # Look at our fbeta_score
     fbeta_score = classifier.get_fbeta_score_valid(y_valid)
     logger.info("Best fine-tuning F2: " + str(fbeta_score))
@@ -233,23 +252,23 @@ def train_partial_vgg16(batch_size, best_full_weights_path, checkpoint_full, cla
     return classifier
 
 
-def train_top_model(img_size, batch_size, best_top_weights_path, checkpoint_top, top_epochs_arr, top_learn_rates,
-                    validation_split_size, x_input, y_true):
+def train_top_model(img_size, batch_size, best_top_weights_path, top_epochs_arr, top_learn_rates,
+                    validation_split_size, X_train, X_valid, y_train, y_valid):
+    # Create a checkpoint, for best model weights
+    checkpoint_top = ModelCheckpoint(best_top_weights_path, monitor='val_acc', verbose=1, save_best_only=True)
+
     img_resize = (img_size, img_size)
 
     # Define and Train model
-    n_classes = y_true.shape[1]
-    X_train, X_valid, y_train, y_valid = train_test_split(x_input, y_true,
-                                                          test_size=validation_split_size)
+    n_classes = y_train.shape[1]
+
     logger.info("Training dense top model.")
     classifier = TransferModel()
     logger.info("Classifier initialized.")
     classifier.build_vgg16(img_resize, 3, n_classes)
     logger.info("Vgg16 built.")
     classifier.predict_bottleneck_features(X_train, X_valid, validation_split_size=validation_split_size)
-    del X_train
-    del X_valid
-    gc.collect()
+
     logger.info("Vgg16 bottleneck features calculated.")
     classifier.build_top_model(n_classes)
     logger.info("Top built, ready to train.")
@@ -283,6 +302,10 @@ def train_top_model(img_size, batch_size, best_top_weights_path, checkpoint_top,
     # Store losses
     np.save("top_train_losses.npy", train_losses)
     np.save("top_tval_losses.npy", val_losses)
+    plt.plot(train_losses, label='Training loss')
+    plt.plot(val_losses, label='Validation loss')
+    plt.legend()
+    plt.savefig('top_loss.png')
     # Look at our fbeta_score
     fbeta_score = classifier.get_fbeta_score_valid(y_valid)
     logger.info("Best top model F2: " + str(fbeta_score))
@@ -363,41 +386,53 @@ def main():
     batch_size = 128
     # Top model parameters
     # learning rate annealing schedule
-    # top_epochs_arr = [10, 5, 5]
-    # top_learn_rates = [0.001, 0.0001, 0.00001]
-    top_epochs_arr = [50]
+    top_epochs_arr = [10, 5, 20]
+    top_learn_rates = [0.001, 0.0001, 0.00001]
+    # top_epochs_arr = [50]
     # top_epochs_arr = [1]
-    top_learn_rates = [0.00001]
+    # top_learn_rates = [0.00001]
     # Fine tuning parameters
     max_train_time_hrs = 3
     n_untrained_layers = 10
-    fine_epochs_arr = [5, 50]  # , 300, 500]
+    #fine_epochs_arr = [5, 50]  # , 300, 500]
+    fine_epochs_arr = [200]  # , 300, 500]
     # fine_epochs_arr = [1, 1, 1, 1]
-    fine_learn_rates = [0.01, 0.001]  # , 0.0001, 0.00001]
+    #fine_learn_rates = [0.01, 0.001]  # , 0.0001, 0.00001]
+    fine_learn_rates = [0.00001]
     fine_momentum_arr = [0.9, 0.9]  # , 0.9, 0.9]
     annealing = True
+    
+    logger.info("img_size: " + str(img_size))
+    logger.info("top_epochs_arr: " + str(top_epochs_arr))
+    logger.info("top_learn_rates: " + str(top_learn_rates))
+    logger.info("n_untrained_layers: " + str(n_untrained_layers))
+    logger.info("fine_epochs_arr: " + str(fine_epochs_arr))
+    logger.info("fine_learn_rates: " + str(fine_learn_rates))
+    logger.info("fine_momentum_arr: " + str(fine_momentum_arr))
 
     #model loading parameters
     n_classes = 17
 
+    train_top = False
     train = True
     load = False
     eval = False
     generate_test = True
 
-    if train or eval or generate_test:
-        x_input, y_true, y_map = load_train_input(img_size)
-
-    if train:
+    if train or train_top or eval or generate_test:
         get_data(competition_name, destination_path, is_datasets_present, test, test_additional, test_additional_u,
                  test_labels, test_u, train, train_u)
+        x_input, y_true, y_map = load_train_input(img_size)
+
+    if train_top:
+        classifier = train_top_model(img_size, batch_size, best_top_weights_path, top_epochs_arr,
+                                     top_learn_rates, validation_split_size, x_input, y_true)
+
+    if train:
         classifier = fine_tune_vgg16(x_input, y_true, img_size, annealing, batch_size, best_full_weights_path,
                                      best_top_weights_path, fine_epochs_arr, fine_learn_rates, fine_momentum_arr,
                                      max_train_time_hrs, n_untrained_layers, top_epochs_arr, top_learn_rates,
                                      validation_split_size)
-        del x_input
-        del y_true
-        gc.collect()
 
     if load:
         classifier = load_fine_tuned_vgg16(img_size, n_classes, n_untrained_layers, best_top_weights_path, best_full_weights_path)
@@ -408,10 +443,10 @@ def main():
         logger.info("F2(c_thresh="+str(threshold)+"): " + str(f2))
 
     if generate_test:
-        x_test, x_test_filename = load_test_input(img_size)
         del x_input
         del y_true
         gc.collect()
+        x_test, x_test_filename = load_test_input(img_size)
         create_test_file(classifier, x_test, x_test_filename, y_map)
 
 
