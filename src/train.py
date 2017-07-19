@@ -24,6 +24,8 @@ import tensorflow as tf
 
 import data_helper
 from keras_transfer_learning import TransferModel
+from keras_helper import AmazonKerasClassifier as CNNModel
+
 from kaggle_data.downloader import KaggleDataDownloader
 from keras.callbacks import ModelCheckpoint
 
@@ -171,7 +173,6 @@ def load_fine_tuned_vgg16(img_size, n_classes, n_untrained_layers, top_weights_p
     logger.debug("Loaded VGG16 model.")
     return classifier
 
-
 def train_partial_vgg16(batch_size, best_full_weights_path, classifier, fine_epochs_arr,
                         fine_learn_rates, fine_momentum_arr, max_train_time_hrs, n_untrained_layers,
                         validation_split_size, X_train, X_valid, y_train, y_valid, annealing):
@@ -312,9 +313,120 @@ def train_top_model(img_size, batch_size, best_top_weights_path, top_epochs_arr,
     return classifier
 
 
+def load_cnn(img_size, n_classes, best_cnn_weights_path):
+    img_resize = (img_size, img_size)
+    classifier = CNNModel()
+    classifier.add_conv_layer(img_resize)
+    classifier.add_flatten_layer()
+    classifier.add_ann_layer(n_classes)
+    classifier.load_weights(best_cnn_weights_path)
+    logger.debug("Loaded CNN model.")
+    return classifier
+
+
+def train_cnn_model(img_size, batch_size, best_cnn_weights_path, cnn_epochs_arr, cnn_learn_rates,
+                    validation_split_size, X_train, X_valid, y_train, y_valid):
+    # Create a checkpoint, for best model weights
+    checkpoint_cnn = ModelCheckpoint(best_cnn_weights_path, monitor='val_acc', verbose=1, save_best_only=True)
+
+    img_resize = (img_size, img_size)
+    n_classes = y_train.shape[1]
+
+    # Define and Train model
+    classifier = CNNModel()
+    classifier.add_conv_layer(img_resize)
+    classifier.add_flatten_layer()
+    classifier.add_ann_layer(n_classes)
+    logger.info("CNN built, ready to train.")
+    train_losses, val_losses = [], []
+    start = time.time()
+    for learn_rate, epochs in zip(cnn_learn_rates, cnn_epochs_arr):
+        tmp_train_losses, tmp_val_losses, fbeta_score = classifier.train_model_new(X_train, X_valid, y_train, y_valid, learn_rate, epochs,
+                                                                                   batch_size,
+                                                                                   validation_split_size=validation_split_size,
+                                                                                   train_callbacks=[checkpoint_cnn])
+        train_losses += tmp_train_losses
+        val_losses += tmp_val_losses
+
+        logger.info("learn_rate : " + str(learn_rate))
+        logger.info("epochs : " + str(epochs))
+        logger.info("fbeta_score : " + str(fbeta_score))
+        logger.info("classification_threshold : " + str(classifier.classification_threshold))
+
+    end = time.time()
+    t_epoch = float(end - start) / sum(cnn_epochs_arr)
+    logger.info("Training time [s/epoch]: " + str(t_epoch))
+    # ## Load Best Weights
+    # Here you should load back in the best weights that were automatically saved by ModelCheckpoint during training
+    classifier.load_weights(best_cnn_weights_path)
+    logger.info("Weights loaded")
+    # ## Monitor the results
+    # Check that we do not overfit by plotting the losses of the train and validation sets
+    # plt.plot(train_losses, label='Training loss')
+    # plt.plot(val_losses, label='Validation loss')
+    # plt.legend();
+    # Store losses
+    np.save("cnn_train_losses.npy", train_losses)
+    np.save("cnn_val_losses.npy", val_losses)
+    plt.plot(train_losses, label='Training loss')
+    plt.plot(val_losses, label='Validation loss')
+    plt.legend()
+    plt.savefig('cnn_loss.png')
+    # Look at our fbeta_score
+    fbeta_score = classifier._get_fbeta_score(classifier, X_valid, y_valid)
+    logger.info("Best CNN model F2: " + str(fbeta_score))
+    return classifier
+
 def create_test_file(classifier, x_test, x_test_filename , y_map, classification_threshold=0.2):
 
     predictions = classifier.predict(x_test)
+    logger.info("Predictions shape: {}\nFiles name shape: {}\n1st predictions entry:\n{}".format(predictions.shape,
+                                                                                           x_test_filename.shape,
+                                                                                           predictions[0]))
+
+    thresholds = [classification_threshold] * len(y_map)
+
+    # TODO complete
+    #tags_pred = np.array(predictions).T
+    #_, axs = plt.subplots(5, 4, figsize=(15, 20))
+    #axs = axs.ravel()
+
+    #for i, tag_vals in enumerate(tags_pred):
+    #    sns.boxplot(tag_vals, orient='v', palette='Set2', ax=axs[i]).set_title(y_map[i])
+
+    # Now lets map our predictions to their tags and use the thresholds we just retrieved
+    predicted_labels = classifier.map_predictions(predictions, y_map, thresholds)
+
+    # Finally lets assemble and visualize our prediction for the test dataset
+    tags_list = [None] * len(predicted_labels)
+    for i, tags in enumerate(predicted_labels):
+        tags_list[i] = ' '.join(map(str, tags))
+
+    final_data = [[filename.split(".")[0], tags] for filename, tags in zip(x_test_filename, tags_list)]
+
+
+    final_df = pd.DataFrame(final_data, columns=['image_name', 'tags'])
+    #final_df.head()
+
+
+    #tags_s = pd.Series(list(chain.from_iterable(predicted_labels))).value_counts()
+    #fig, ax = plt.subplots(figsize=(16, 8))
+    #sns.barplot(x=tags_s, y=tags_s.index, orient=' h');
+
+    # And save it to a submission file
+    final_df.to_csv('../submission_file.csv', index=False)
+    classifier.close()
+
+def create_test_file_ensemble(classifiers, x_test, x_test_filename , y_map, classification_threshold=0.2):
+    predictions = None
+    for classifier in classifiers:
+        predictions_tmp = classifier.predict(x_test)
+        if predictions is None:
+            predictions = predictions_tmp
+        else:
+            predictions += predictions_tmp
+
+    predictions = predictions / len(classifiers)
     logger.info("Predictions shape: {}\nFiles name shape: {}\n1st predictions entry:\n{}".format(predictions.shape,
                                                                                            x_test_filename.shape,
                                                                                            predictions[0]))
@@ -381,8 +493,11 @@ def main():
     # Weights parameters
     best_top_weights_path = run_name + "weights_top_best.hdf5"
     best_full_weights_path = run_name + "weights_full_best.hdf5"
+    best_cnn_weights_path = run_name + "weights_cnn_best.hdf5"
     load_top_weights_path = "models/weights_top_best_7.hdf5"
     load_full_weights_path = "models/weights_full_best_6.hdf5"
+    load_cnn_weights_path = "models/weights_cnn_best_0.hdf5"
+
     # Training parameters
     validation_split_size = 0.2
     batch_size = 128
@@ -403,10 +518,15 @@ def main():
     fine_learn_rates = [0.0001, 0.00001]
     fine_momentum_arr = [0.9, 0.9]  # , 0.9, 0.9]
     annealing = True
+
+    cnn_epochs_arr = [10, 5, 5]
+    cnn_learn_rates = [0.001, 0.0001, 0.00001]
     
     logger.info("img_size: " + str(img_size))
     logger.info("top_epochs_arr: " + str(top_epochs_arr))
     logger.info("top_learn_rates: " + str(top_learn_rates))
+    logger.info("cnn_epochs_arr: " + str(cnn_epochs_arr))
+    logger.info("cnn_learn_rates: " + str(cnn_learn_rates))
     logger.info("n_untrained_layers: " + str(n_untrained_layers))
     logger.info("fine_epochs_arr: " + str(fine_epochs_arr))
     logger.info("fine_learn_rates: " + str(fine_learn_rates))
@@ -416,12 +536,17 @@ def main():
     n_classes = 17
 
     train_top = False
-    train = True
-    load = False
+    train = False
+    train_cnn = False
+    load = True
+    load_cnn_model = True
     eval = False
-    generate_test = True
+    generate_test = False
+    generate_test_ensemble = True
 
-    if train or train_top or eval or generate_test:
+    classifiers = []
+
+    if train or train_top or train_cnn or eval or generate_test or generate_test_ensemble:
         get_data(competition_name, destination_path, is_datasets_present, test, test_additional, test_additional_u,
                  test_labels, test_u, train, train_u)
         x_input, y_true, y_map = load_train_input(img_size)
@@ -439,8 +564,19 @@ def main():
                                      max_train_time_hrs, n_untrained_layers, top_epochs_arr, top_learn_rates,
                                      validation_split_size)
 
+    if train_cnn:
+        X_train, X_valid, y_train, y_valid = train_test_split(x_input, y_true,
+                                                              test_size=validation_split_size)
+
+        classifier = train_cnn_model(img_size, batch_size, best_cnn_weights_path, cnn_epochs_arr, cnn_learn_rates,
+                    validation_split_size, X_train, X_valid, y_train, y_valid)
     if load:
         classifier = load_fine_tuned_vgg16(img_size, n_classes, n_untrained_layers, load_top_weights_path, load_full_weights_path)
+        classifiers.append(classifier)
+
+    if load_cnn_model:
+        classifier = load_cnn(img_size, n_classes, load_cnn_weights_path)
+        classifiers.append(classifier)
 
     if eval:
         f2, threshold = evaluate(classifier, x_input, y_true)
@@ -453,6 +589,13 @@ def main():
         gc.collect()
         x_test, x_test_filename = load_test_input(img_size)
         create_test_file(classifier, x_test, x_test_filename, y_map)
+
+    if generate_test_ensemble:
+        del x_input
+        del y_true
+        gc.collect()
+        x_test, x_test_filename = load_test_input(img_size)
+        create_test_file_ensemble(classifiers, x_test, x_test_filename, y_map)
 
 
 if __name__ == "__main__":
