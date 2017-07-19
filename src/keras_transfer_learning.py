@@ -199,7 +199,7 @@ class TransferModel:
                       metrics=['accuracy'])
 
         # early stopping will auto-stop training process if model stops learning after 3 epochs
-        earlyStopping = EarlyStopping(monitor='val_loss', patience=3, verbose=0, mode='auto')
+        earlyStopping = EarlyStopping(monitor='val_loss', patience=10, verbose=0, mode='auto')
         self.top_model.fit(self.bottleneck_feat_trn, y_train,
                            epochs=epoch,
                            batch_size=batch_size,
