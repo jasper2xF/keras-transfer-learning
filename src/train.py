@@ -381,13 +381,15 @@ def main():
     # Weights parameters
     best_top_weights_path = run_name + "weights_top_best.hdf5"
     best_full_weights_path = run_name + "weights_full_best.hdf5"
+    load_top_weights_path = "models/weights_top_best_7.hdf5"
+    load_full_weights_path = "models/weights_full_best_6.hdf5"
     # Training parameters
     validation_split_size = 0.2
     batch_size = 128
     # Top model parameters
     # learning rate annealing schedule
-    top_epochs_arr = [10, 5, 20]
-    top_learn_rates = [0.001, 0.0001, 0.00001]
+    top_epochs_arr = [20, 50]
+    top_learn_rates = [0.0001, 0.00001]
     # top_epochs_arr = [50]
     # top_epochs_arr = [1]
     # top_learn_rates = [0.00001]
@@ -395,10 +397,10 @@ def main():
     max_train_time_hrs = 3
     n_untrained_layers = 10
     #fine_epochs_arr = [5, 50]  # , 300, 500]
-    fine_epochs_arr = [200]  # , 300, 500]
+    fine_epochs_arr = [50, 50]  # , 300, 500]
     # fine_epochs_arr = [1, 1, 1, 1]
     #fine_learn_rates = [0.01, 0.001]  # , 0.0001, 0.00001]
-    fine_learn_rates = [0.00001]
+    fine_learn_rates = [0.0001, 0.00001]
     fine_momentum_arr = [0.9, 0.9]  # , 0.9, 0.9]
     annealing = True
     
@@ -425,8 +427,11 @@ def main():
         x_input, y_true, y_map = load_train_input(img_size)
 
     if train_top:
+        X_train, X_valid, y_train, y_valid = train_test_split(x_input, y_true,
+                                                              test_size=validation_split_size)
+
         classifier = train_top_model(img_size, batch_size, best_top_weights_path, top_epochs_arr,
-                                     top_learn_rates, validation_split_size, x_input, y_true)
+                                     top_learn_rates, validation_split_size, X_train, X_valid, y_train, y_valid)
 
     if train:
         classifier = fine_tune_vgg16(x_input, y_true, img_size, annealing, batch_size, best_full_weights_path,
@@ -435,7 +440,7 @@ def main():
                                      validation_split_size)
 
     if load:
-        classifier = load_fine_tuned_vgg16(img_size, n_classes, n_untrained_layers, best_top_weights_path, best_full_weights_path)
+        classifier = load_fine_tuned_vgg16(img_size, n_classes, n_untrained_layers, load_top_weights_path, load_full_weights_path)
 
     if eval:
         f2, threshold = evaluate(classifier, x_input, y_true)
