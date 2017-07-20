@@ -71,6 +71,27 @@ class TransferModel:
         self.bottleneck_feat_val = None
         self.classification_threshold = 0.2
 
+    def build_base_model(self, architecture, img_size, img_channels, n_classes):
+        """Set base model to pre-trained architecture.
+
+        Options are:
+        vgg16
+        vgg19
+        resnet50
+        inceptionv3
+        """
+        if architecture == "vgg16":
+            self.build_vgg16(img_size, img_channels, n_classes)
+        elif architecture == "vgg19":
+            self.build_vgg19(img_size, img_channels, n_classes)
+        elif architecture == "resnet50":
+            self.build_resnet50(img_size, img_channels, n_classes)
+        elif architecture == "inceptionv3":
+            self.build_inceptionv3(img_size, img_channels, n_classes)
+        else:
+            raise ValueError("Invalid architecture: '" + architecture + "'")
+        return None
+
     def build_vgg16(self, img_size, img_channels, n_classes):
         """VGG16 model, with weights pre-trained on ImageNet.
 
@@ -113,7 +134,7 @@ class TransferModel:
     def build_inceptionv3(self, img_size, img_channels, n_classes):
         """Inception V3 model, with weights pre-trained on ImageNet.
 
-        Width and height should be no smaller than 13
+        Width and height should be no smaller than 139
         """
         img_width = img_size[0]
         img_height = img_size[1]

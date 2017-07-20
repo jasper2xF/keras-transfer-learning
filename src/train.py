@@ -140,19 +140,19 @@ def load_test_input(img_size):
     return x_test, x_test_filename
 
 
-def fine_tune_vgg16(x_input, y_true, img_size, annealing, batch_size, best_full_weights_path, best_top_weights_path,
+def fine_tune_model(architecture, x_input, y_true, img_size, annealing, batch_size, best_full_weights_path, best_top_weights_path,
                     fine_epochs_arr, fine_learn_rates, fine_momentum_arr, max_train_time_hrs, n_untrained_layers,
                     top_epochs_arr, top_learn_rates, validation_split_size):
     X_train, X_valid, y_train, y_valid = train_test_split(x_input, y_true,
                                                           test_size=validation_split_size)
 
-    classifier = train_top_model(img_size, batch_size, best_top_weights_path, top_epochs_arr,
+    classifier = train_top_model(architecture, img_size, batch_size, best_top_weights_path, top_epochs_arr,
                                  top_learn_rates, validation_split_size, X_train, X_valid, y_train, y_valid)
 
     # ## Fine-tune full model
     #
-    # Now we retrain the top model together with the last convolutional layer from the VGG16 model
-    classifier = train_partial_vgg16(batch_size, best_full_weights_path, classifier, fine_epochs_arr,
+    # Now we retrain the top model together with the base model
+    classifier = train_partial_model(architecture, batch_size, best_full_weights_path, classifier, fine_epochs_arr,
                                      fine_learn_rates, fine_momentum_arr, max_train_time_hrs, n_untrained_layers,
                                      validation_split_size, X_train, X_valid, y_train, y_valid, annealing)
     del X_train
@@ -163,17 +163,17 @@ def fine_tune_vgg16(x_input, y_true, img_size, annealing, batch_size, best_full_
     return classifier
 
 
-def load_fine_tuned_vgg16(img_size, n_classes, n_untrained_layers, top_weights_path, fine_weights_path):
+def load_fine_tuned_model(architecture, img_size, n_classes, n_untrained_layers, top_weights_path, fine_weights_path):
     classifier = TransferModel()
-    classifier.build_vgg16([img_size, img_size], 3, n_classes)
+    classifier.build_base_model(architecture, [img_size, img_size], 3, n_classes)
     classifier.build_top_model(n_classes)
     classifier.load_top_weights(top_weights_path)
     classifier.split_fine_tuning_models(n_untrained_layers)
     classifier.load_top_weights(fine_weights_path)
-    logger.debug("Loaded VGG16 model.")
+    logger.debug("Loaded " + architecture +" model.")
     return classifier
 
-def train_partial_vgg16(batch_size, best_full_weights_path, classifier, fine_epochs_arr,
+def train_partial_model(architecture, batch_size, best_full_weights_path, classifier, fine_epochs_arr,
                         fine_learn_rates, fine_momentum_arr, max_train_time_hrs, n_untrained_layers,
                         validation_split_size, X_train, X_valid, y_train, y_valid, annealing):
 
@@ -182,11 +182,11 @@ def train_partial_vgg16(batch_size, best_full_weights_path, classifier, fine_epo
 
     max_train_time_secs = max_train_time_hrs * 60 * 60
 
-    logger.info("Fine tuning top model and VGG16 layers.")
+    logger.info("Fine tuning top model and base model layers.")
     logger.info("Will train for max " + str(float(max_train_time_secs) / 60) + " min.")
     init_top_weights = classifier.split_fine_tuning_models(n_untrained_layers)
     split_layer_name = classifier.base_model.layers[n_untrained_layers].name
-    logger.info("Splitting at: " + split_layer_name)
+    logger.info("Splitting at: " + split_layer_name + "(last base model layer)")
     classifier.predict_bottleneck_features(X_train, X_valid, validation_split_size=validation_split_size)
 
     logger.info("Bottleneck features calculated.")
@@ -253,7 +253,7 @@ def train_partial_vgg16(batch_size, best_full_weights_path, classifier, fine_epo
     return classifier
 
 
-def train_top_model(img_size, batch_size, best_top_weights_path, top_epochs_arr, top_learn_rates,
+def train_top_model(architecture, img_size, batch_size, best_top_weights_path, top_epochs_arr, top_learn_rates,
                     validation_split_size, X_train, X_valid, y_train, y_valid):
     # Create a checkpoint, for best model weights
     checkpoint_top = ModelCheckpoint(best_top_weights_path, monitor='val_acc', verbose=1, save_best_only=True)
@@ -266,11 +266,11 @@ def train_top_model(img_size, batch_size, best_top_weights_path, top_epochs_arr,
     logger.info("Training dense top model.")
     classifier = TransferModel()
     logger.info("Classifier initialized.")
-    classifier.build_vgg16(img_resize, 3, n_classes)
-    logger.info("Vgg16 built.")
+    classifier.build_base_model(architecture, img_resize, 3, n_classes)
+    logger.info("Base model " + architecture + " built.")
     classifier.predict_bottleneck_features(X_train, X_valid, validation_split_size=validation_split_size)
 
-    logger.info("Vgg16 bottleneck features calculated.")
+    logger.info("Bottleneck features calculated.")
     classifier.build_top_model(n_classes)
     logger.info("Top built, ready to train.")
     train_losses, val_losses = [], []
@@ -489,7 +489,7 @@ def main():
     # Define the dimensions of the image data trained by the network. Due to memory constraints we can't load in the
     # full size 256x256 jpg images. Recommended resized images could be 32x32, 64x64, or 128x128.
     img_size = 64
-
+    architecture = "vgg19"
     # Weights parameters
     best_top_weights_path = run_name + "weights_top_best.hdf5"
     best_full_weights_path = run_name + "weights_full_best.hdf5"
@@ -510,16 +510,16 @@ def main():
     # top_learn_rates = [0.00001]
     # Fine tuning parameters
     max_train_time_hrs = 3
-    n_untrained_layers = 10
+    n_untrained_layers = 11
     #fine_epochs_arr = [5, 50]  # , 300, 500]
-    fine_epochs_arr = [50, 50]  # , 300, 500]
+    fine_epochs_arr = [100, 100]  # , 300, 500]
     # fine_epochs_arr = [1, 1, 1, 1]
     #fine_learn_rates = [0.01, 0.001]  # , 0.0001, 0.00001]
     fine_learn_rates = [0.0001, 0.00001]
     fine_momentum_arr = [0.9, 0.9]  # , 0.9, 0.9]
     annealing = True
 
-    cnn_epochs_arr = [10, 5, 5]
+    cnn_epochs_arr = [5, 10, 20]
     cnn_learn_rates = [0.001, 0.0001, 0.00001]
     
     logger.info("img_size: " + str(img_size))
@@ -536,13 +536,13 @@ def main():
     n_classes = 17
 
     train_top = False
-    train = False
+    train = True
     train_cnn = False
-    load = True
-    load_cnn_model = True
+    load = False
+    load_cnn_model = False
     eval = False
     generate_test = False
-    generate_test_ensemble = True
+    generate_test_ensemble = False
 
     classifiers = []
 
@@ -559,7 +559,7 @@ def main():
                                      top_learn_rates, validation_split_size, X_train, X_valid, y_train, y_valid)
 
     if train:
-        classifier = fine_tune_vgg16(x_input, y_true, img_size, annealing, batch_size, best_full_weights_path,
+        classifier = fine_tune_model(architecture, x_input, y_true, img_size, annealing, batch_size, best_full_weights_path,
                                      best_top_weights_path, fine_epochs_arr, fine_learn_rates, fine_momentum_arr,
                                      max_train_time_hrs, n_untrained_layers, top_epochs_arr, top_learn_rates,
                                      validation_split_size)
@@ -571,7 +571,7 @@ def main():
         classifier = train_cnn_model(img_size, batch_size, best_cnn_weights_path, cnn_epochs_arr, cnn_learn_rates,
                     validation_split_size, X_train, X_valid, y_train, y_valid)
     if load:
-        classifier = load_fine_tuned_vgg16(img_size, n_classes, n_untrained_layers, load_top_weights_path, load_full_weights_path)
+        classifier = load_fine_tuned_model(architecture, img_size, n_classes, n_untrained_layers, load_top_weights_path, load_full_weights_path)
         classifiers.append(classifier)
 
     if load_cnn_model:
