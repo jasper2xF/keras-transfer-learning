@@ -19,60 +19,56 @@ from keras.applications.inception_v3 import InceptionV3
 from keras.models import Model
 from keras import optimizers
 
-# vgg16 weights require th input ordering
-#from keras import backend as K
-#K.set_image_dim_ordering('th')
-
 class LossHistory(Callback):
+    """
+    Class for loss history through epoch end callback.
+
+    on_epoch_end(self, epoch, logs={})
+    """
     def __init__(self):
         super().__init__()
         self.train_losses = []
         self.val_losses = []
 
     def on_epoch_end(self, epoch, logs={}):
+        """Append 'loss' and 'val_loss' to internal data structure."""
         self.train_losses.append(logs.get('loss'))
         self.val_losses.append(logs.get('val_loss'))
 
 
 class TransferModel:
-    """Class for retraining VGG16 architecture.
+    """
+    Class for retraining VGG16 architecture.
 
     Supports retraining dense top_model:
-        classifier = VGG16DenseRetrainer(...)
-        classifier.build_vgg16(...)
-        classifier.predict_bottleneck_features(...)
-        classifier.build_top_model(...)
-        classifier.train_top_model(...)
-    Supports retraining dense top_model with layers of VGG16 architecture. Note that this requires training vanilla
+        classifier = TransferModel()
+        classifier.build_base_model(architecture, img_size, img_channels)
+        classifier.build_top_model(n_classes, n_dense=256, dropout_rate=0.3)
+        classifier.train_top_model(y_train, y_valid, learn_rate=0.001, epoch=5, batch_size=128, train_callbacks=())
+    Supports retraining dense top_model with layers of base architecture. Note that this requires training vanilla
     dense top_model first:
         *dense top model steps*
-        classifier.split_fine_tuning_models(...)
-        classifier.predict_bottleneck_features(...)
-        classifier.fine_tune_full_model(...)
-    When training over multiple parameters in loop make sure to load original top_model weights stored by
-    build_full_model(...) model call:
+        classifier.split_fine_tuning_models(split_layer_id)
+        classifier.predict_bottleneck_features(x_train, x_valid)
+        classifier.fine_tune_full_model(y_train, y_valid, learn_rate=0.001, epoch=5, batch_size=128, train_callbacks=())
+    Supports retraining dense top_model with full base architecture. Note that this requires training vanilla dense
+    top_model first:
         *dense top model steps*
-        init_top_weights = classifier.split_fine_tuning_models(...)
-        classifier.predict_bottleneck_features(...)
-        for param in params:
-            classifier.set_top_model_weights(init_top_weights)
-            classifier.fine_tune_full_model(...)
-
+        classifier.set_full_retrain()
+        classifier.retrain_full_model(y_train, y_valid, learn_rate=0.001, epoch=5, batch_size=128, train_callbacks=())
     """
-    def __init__(self, path_bottleneck_feat_trn='bottleneck_features_train.npy',
-                 path_bottleneck_feat_val='bottleneck_features_validation.npy'):
+    def __init__(self):
         self.losses = []
         self.base_model = None
         self.top_model = Sequential()
         self.full_model = None
-        self.path_bottleneck_feat_trn = path_bottleneck_feat_trn
-        self.path_bottleneck_feat_val = path_bottleneck_feat_val
         self.bottleneck_feat_trn = None
         self.bottleneck_feat_val = None
         self.classification_threshold = 0.2
 
-    def build_base_model(self, architecture, img_size, img_channels, n_classes):
-        """Set base model to pre-trained architecture.
+    def build_base_model(self, architecture, img_size, img_channels):
+        """
+        Set base model to pre-trained architecture.
 
         Options are:
         vgg16
@@ -81,19 +77,20 @@ class TransferModel:
         inceptionv3
         """
         if architecture == "vgg16":
-            self.build_vgg16(img_size, img_channels, n_classes)
+            self.build_vgg16(img_size, img_channels)
         elif architecture == "vgg19":
-            self.build_vgg19(img_size, img_channels, n_classes)
+            self.build_vgg19(img_size, img_channels)
         elif architecture == "resnet50":
-            self.build_resnet50(img_size, img_channels, n_classes)
+            self.build_resnet50(img_size, img_channels)
         elif architecture == "inceptionv3":
-            self.build_inceptionv3(img_size, img_channels, n_classes)
+            self.build_inceptionv3(img_size, img_channels)
         else:
             raise ValueError("Invalid architecture: '" + architecture + "'")
         return None
 
-    def build_vgg16(self, img_size, img_channels, n_classes):
-        """VGG16 model, with weights pre-trained on ImageNet.
+    def build_vgg16(self, img_size, img_channels):
+        """
+        VGG16 model, with weights pre-trained on ImageNet.
 
         Width and height should be no smaller than 48.
         """
@@ -102,11 +99,11 @@ class TransferModel:
 
         self.base_model = VGG16(include_top=False, weights='imagenet',
               input_tensor=None, input_shape=(img_width, img_height, img_channels),
-              pooling=None,
-              classes=n_classes)
+              pooling=None)
 
-    def build_vgg19(self, img_size, img_channels, n_classes):
-        """VGG19 model, with weights pre-trained on ImageNet.
+    def build_vgg19(self, img_size, img_channels):
+        """
+        VGG19 model, with weights pre-trained on ImageNet.
 
         Width and height should be no smaller than 48.
         """
@@ -115,11 +112,11 @@ class TransferModel:
 
         self.base_model = VGG19(include_top=False, weights='imagenet',
               input_tensor=None, input_shape=(img_width, img_height, img_channels),
-              pooling=None,
-              classes=n_classes)
+              pooling=None)
 
-    def build_resnet50(self, img_size, img_channels, n_classes):
-        """ResNet50 model, with weights pre-trained on ImageNet.
+    def build_resnet50(self, img_size, img_channels):
+        """
+        ResNet50 model, with weights pre-trained on ImageNet.
 
         Width and height should be no smaller than 197.
         """
@@ -128,11 +125,11 @@ class TransferModel:
         #width and height should be no smaller than 71
         self.base_model = ResNet50(include_top=False, weights='imagenet',
                                 input_tensor=None, input_shape=(img_width, img_height, img_channels),
-                                pooling=None,
-                                classes=n_classes)
+                                pooling=None)
 
-    def build_inceptionv3(self, img_size, img_channels, n_classes):
-        """Inception V3 model, with weights pre-trained on ImageNet.
+    def build_inceptionv3(self, img_size, img_channels):
+        """
+        Inception V3 model, with weights pre-trained on ImageNet.
 
         Width and height should be no smaller than 139
         """
@@ -141,28 +138,44 @@ class TransferModel:
         # width and height should be no smaller than 71
         self.base_model = InceptionV3(include_top=False, weights='imagenet',
                                    input_tensor=None, input_shape=(img_width, img_height, img_channels),
-                                   pooling=None,
-                                   classes=n_classes)
+                                   pooling=None)
 
-    def predict_bottleneck_features(self, X_train, X_valid, validation_split_size=0.2):
-        """Runs input through vgg16 architecture to generate and save bottleneck features."""
-        self.bottleneck_feat_trn = self.base_model.predict(X_train)
-        np.save(open(self.path_bottleneck_feat_trn, 'wb'), self.bottleneck_feat_trn)
+    def predict_bottleneck_features(self, x_train, x_valid):
+        """
+        DEPRECATED - Runs input through base model to predict, store and return bottleneck features.
 
-        self.bottleneck_feat_val = self.base_model.predict(X_valid)
-        np.save(open(self.path_bottleneck_feat_val, 'wb'), self.bottleneck_feat_val)
+        Warning: Bottleneck features are stored as member variables. This can cause memory usage issues.
+        """
+        # TODO: Do not store bottleneck features internally but return and let user handle these large variables
+        self.bottleneck_feat_trn = self.base_model.predict(x_train)
+        self.bottleneck_feat_val = self.base_model.predict(x_valid)
+        return self.bottleneck_feat_trn, self.bottleneck_feat_val
 
-    def _get_fbeta_score(self, classifier, X_valid, y_valid, threshold=None):
+    def _get_fbeta_score(self, classifier, x_valid, y_valid, threshold=None):
+        """DEPRECATED - Calculate F2 score."""
+        # TODO: Move out, class is not responsible for evaluation
         if threshold is None:
             threshold = self.classification_threshold
-        p_valid = classifier.predict(X_valid)
+        p_valid = classifier.predict(x_valid)
         return fbeta_score(y_valid, np.array(p_valid) > threshold, beta=2, average='samples')
 
-    def fit_classification_threshold(self, classifier, x_input, y_true):
+    def fit_classification_threshold(self, classifier, x_input, y_true, t_max=5):
+        """
+        DEPRECATED - Fits classification threshold to maximize f2 score.
+
+        Threshold ranges from 0.1 to 0.t_max with 0.1 steps.
+
+        :param classifier: classifier to be used for prediction.
+        :param x_input: input data for fitting
+        :param y_true: gold labels for fitting
+        :param t_max: integer for max threshold 0.t_max
+        :return:
+        """
+        # TODO: Move out, class is not responsible
         prediction = classifier.predict(x_input)
 
         best_f2 = 0
-        for i in range(1,6):
+        for i in range(1,t_max+1):
             threshold = float(i)/10
             f2 = fbeta_score(y_true, np.array(prediction) > threshold, beta=2, average='samples')
             if f2 > best_f2:
@@ -172,18 +185,34 @@ class TransferModel:
         return self.classification_threshold
 
     def get_fbeta_score_valid(self, y_valid):
+        """
+        DEPRECATED - Calculate F2 score based on gold labels and stored bottleneck features.
+
+        :param y_valid:
+        :return:
+        """
+        # TODO: Move out, class is not responsible for evaluation
         fbeta_score = self._get_fbeta_score(self.top_model, self.bottleneck_feat_val, y_valid)
         return fbeta_score
 
     def build_top_model(self, n_classes, n_dense=256, dropout_rate=0.3):
+        """
+        Build a top model top use on top of base architecture.
+
+        Creates one dense layer of 'relu' units of dimension n_dense and an output layer of 'sigmoid' units or
+        dimension n_classe.
+        :param n_classes: Number of output 'sigmoid' units
+        :param n_dense: Number of dense layer 'relu' units (default=256)
+        :param dropout_rate: Dropout rate for dense layer (default=0.3)
+        :return:
+        """
         self.top_model.add(Flatten(input_shape=self.base_model.output_shape[1:]))
         self.top_model.add(Dense(n_dense, activation='relu'))
         self.top_model.add(Dropout(dropout_rate))
         self.top_model.add(Dense(n_classes, activation='sigmoid'))
 
-    def train_top_model(self, y_train, y_valid, learn_rate=0.001, epoch=5, batch_size=128, validation_split_size=0.2,
-                    train_callbacks=()):
-        """Builds and trains top model."""
+    def train_top_model(self, y_train, y_valid, learn_rate=0.001, epoch=5, batch_size=128, train_callbacks=()):
+        """Train top model with cross entropy loss and adam optimizer."""
         history = LossHistory()
 
         opt = Adam(lr=learn_rate)
@@ -191,40 +220,58 @@ class TransferModel:
         self.top_model.compile(loss='binary_crossentropy', optimizer=opt, metrics=['accuracy'])
 
         # early stopping will auto-stop training process if model stops learning after 3 epochs
-        earlyStopping = EarlyStopping(monitor='val_loss', patience=3, verbose=0, mode='auto')
+        early_stopping = EarlyStopping(monitor='val_loss', patience=3, verbose=0, mode='auto')
 
         self.top_model.fit(self.bottleneck_feat_trn, y_train,
                            epochs=epoch,
                            batch_size=batch_size,
                            verbose=2,
                            validation_data=(self.bottleneck_feat_val, y_valid),
-                           callbacks=[history, *train_callbacks, earlyStopping])
+                           callbacks=[history, *train_callbacks, early_stopping])
         #determine classification threshold
         self.fit_classification_threshold(self.top_model, self.bottleneck_feat_trn, y_train)
         fbeta_score = self._get_fbeta_score(self.top_model, self.bottleneck_feat_val, y_valid)
         return [history.train_losses, history.val_losses, fbeta_score]
 
     def save_top_weights(self, weight_file_path):
+        """
+        Save top model weights.
+
+        Applies to all weights if set_full_retrain() was called.
+        """
         self.top_model.save_weights(weight_file_path)
 
     def load_top_weights(self, weight_file_path):
+        """
+        Lead top model weights.
+
+        Applies to all weights if set_full_retrain() was called.
+        """
         self.top_model.load_weights(weight_file_path)
 
     def set_top_weights(self, weights):
+        """
+        Set top model weights.
+
+        Applies to all weights if set_full_retrain() was called.
+        """
         self.top_model.set_weights(weights)
 
     def get_top_weights(self):
+        """
+        Set top model weights.
+
+        Applies to all weights if set_full_retrain() was called.
+        """
         return self.top_model.get_weights()
 
-    #def load_full_weights(self, weight_file_path):
-    #    self.full_model.load_weights(weight_file_path)
-
     def split_fine_tuning_models(self, split_layer_id):
-        """Splits full model at split_layer_id and returns new top_model weights.
+        """
+        Splits full model at split_layer_id and returns weights of new top model.
 
-        Full model consists of previous base_model plus top_model. New base_model goes until split_layer_id. New
-        top_model starts at split_layer_id. The top_model weights are stored and returned as starting point for future
-        retraining.
+        Full model consists of previous base_model and top_model. New base_model goes until split_layer_id (inclusive).
+        New top_model starts at split_layer_id (exclusive). The top_model weights are stored and returned as starting
+        point for future retraining.
         """
         # Create full model for splitting
         full_model = Model(input=self.base_model.input, output=self.top_model(self.base_model.output))
@@ -242,36 +289,25 @@ class TransferModel:
         return self.top_model.get_weights()
 
     def set_full_retrain(self):
-        """Set architecture for complete retraining."""
+        """
+        Combines base and top model into single trainable architecture.
+
+        From now on top model weights methods apply to full model.
+        :return: Weights of model
+        """
+
         self.top_model = Model(input=self.base_model.input, output=self.top_model(self.base_model.output))
         self.base_model = None
         return self.top_model.get_weights()
 
-    def fine_tune_full_model(self, y_train, y_valid, learn_rate=0.001, momentum=0.9, epoch=5, batch_size=128, validation_split_size=0.2,
-                             train_callbacks=()):
-        """Retrain top model and last vgg16 conv block with light weight updates."""
+    def fine_tune_full_model(self, y_train, y_valid, learn_rate=0.001, momentum=0.9, epoch=5, batch_size=128,
+                             train_callbacks=(), early_stop_patience=10):
+        """
+        Retrain top model with layers of base model.
 
-        history = LossHistory()
-
-        opt = Adam(lr=learn_rate)
-
-        self.classifier.compile(loss='binary_crossentropy', optimizer=opt, metrics=['accuracy'])
-
-        # early stopping will auto-stop training process if model stops learning after 3 epochs
-        earlyStopping = EarlyStopping(monitor='val_loss', patience=10, verbose=0, mode='auto')
-        self.top_model.fit(self.bottleneck_feat_trn, y_train,
-                           epochs=epoch,
-                           batch_size=batch_size,
-                           verbose=2,
-                           validation_data=(self.bottleneck_feat_val, y_valid),
-                           callbacks=[history, *train_callbacks, earlyStopping])
-        self.fit_classification_threshold(self.top_model, self.bottleneck_feat_trn, y_train)
-        fbeta_score = self._get_fbeta_score(self.top_model, self.bottleneck_feat_val, y_valid)
-        return [history.train_losses, history.val_losses, fbeta_score]
-
-    def retrain_full_model(self, X_train, X_valid, y_train, y_valid, learn_rate=0.001, momentum=0.9, epoch=5, batch_size=128, validation_split_size=0.2,
-                             train_callbacks=()):
-        """Retrain top model and last vgg16 conv block with light weight updates."""
+        Uses binary cross entropy loss, SGD optimzer with momentum and early stopping.
+        """
+        # TODO: Do not store bottleneck features internally but let user pass them
 
         history = LossHistory()
 
@@ -280,7 +316,34 @@ class TransferModel:
                       metrics=['accuracy'])
 
         # early stopping will auto-stop training process if model stops learning after 3 epochs
-        earlyStopping = EarlyStopping(monitor='val_loss', patience=10, verbose=0, mode='auto')
+        early_stopping = EarlyStopping(monitor='val_loss', patience=early_stop_patience, verbose=0, mode='auto')
+        self.top_model.fit(self.bottleneck_feat_trn, y_train,
+                           epochs=epoch,
+                           batch_size=batch_size,
+                           verbose=2,
+                           validation_data=(self.bottleneck_feat_val, y_valid),
+                           callbacks=[history, *train_callbacks, early_stopping])
+        self.fit_classification_threshold(self.top_model, self.bottleneck_feat_trn, y_train)
+        fbeta_score = self._get_fbeta_score(self.top_model, self.bottleneck_feat_val, y_valid)
+        return [history.train_losses, history.val_losses, fbeta_score]
+
+    def retrain_full_model(self, X_train, X_valid, y_train, y_valid, learn_rate=0.001, momentum=0.9, epoch=5, batch_size=128,
+                             train_callbacks=(), early_stop_patience=10):
+        """
+        Retrain top model with full base model.
+
+        Uses binary cross entropy loss, SGD optimzer with momentum and early stopping.
+        """
+        # TODO: Do not store bottleneck features internally but let user pass them
+
+        history = LossHistory()
+
+        self.top_model.compile(loss='binary_crossentropy',
+                      optimizer=optimizers.SGD(lr=learn_rate, momentum=momentum),
+                      metrics=['accuracy'])
+
+        # early stopping will auto-stop training process if model stops learning after 3 epochs
+        earlyStopping = EarlyStopping(monitor='val_loss', patience=early_stop_patience, verbose=0, mode='auto')
         self.top_model.fit(X_train, y_train,
                            epochs=epoch,
                            batch_size=batch_size,
@@ -291,11 +354,17 @@ class TransferModel:
         fbeta_score = self._get_fbeta_score(self.top_model, X_valid, y_valid)
         return [history.train_losses, history.val_losses, fbeta_score]
 
-    def predict(self, x_test):
+    def predict(self, x_input):
+        """
+        Predict output for given input.
+
+        :param x_input: Model input
+        :return: Predictions of output layer
+        """
         if self.base_model is None:
-            predictions = self.top_model.predict(x_test)
+            predictions = self.top_model.predict(x_input)
         else:
-            bottleneck_features = self.base_model.predict(x_test)
+            bottleneck_features = self.base_model.predict(x_input)
             predictions = self.top_model.predict(bottleneck_features)
         return predictions
 
@@ -315,4 +384,5 @@ class TransferModel:
         return predictions_labels
 
     def close(self):
+        """Clears backend session."""
         backend.clear_session()
