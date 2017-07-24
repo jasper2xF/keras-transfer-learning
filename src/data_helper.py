@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 def _train_transform_to_matrices(*args):
     """
-    
+
     :param args: list of arguments
         file_path: string
             The path of the image
@@ -46,6 +46,7 @@ def _train_transform_to_matrices(*args):
 
 def _test_transform_to_matrices(*args):
     """
+
     :param args: list of arguments
         test_set_folder: string
             The path of the all the test images
@@ -58,7 +59,7 @@ def _test_transform_to_matrices(*args):
                 The image from the file_path as a numpy array resized with img_resize
             file_name: string
                 The name of the test image
-        """
+    """
     test_set_folder, file_name, img_resize = list(args[0])
     img = Image.open('{}/{}'.format(test_set_folder, file_name))
     img.thumbnail(img_resize)
@@ -117,6 +118,21 @@ def _get_train_matrices(train_set_folder, train_csv_file, img_resize, process_co
 
 
 def _get_test_matrices(test_set_folder, img_resize, process_count):
+    """
+
+    :param test_set_folder: string
+        The path of the all the test images
+    :param img_resize: tuple (int, int)
+        The resize size of the original image given by the file_path argument
+    :param process_count: int
+        The number of threads you want to spawn to transform raw images to numpy
+        matrices
+    :return: x_test, x_test_filename
+        x_test: list of float matrices
+            The list of all the images stored as numpy matrices
+        x_test_filename: list of strings
+            A list of file names of the test images
+    """
     x_test = []
     x_test_filename = []
     files_name = os.listdir(test_set_folder)
@@ -170,7 +186,8 @@ def store_test_data(data_dir, x_test, x_test_filename):
 
 def preprocess_train_data(train_set_folder, train_csv_file, img_resize=(32, 32), process_count=cpu_count()):
     """
-    Transform the train images to ready to use data for the CNN 
+    Transform the train images to ready to use data for the CNN
+
     :param train_set_folder: the folder containing the images for training
     :param train_csv_file: the file containing the labels of the training images
     :param img_resize: the standard size you want to have on images when transformed to matrices
@@ -190,6 +207,7 @@ def preprocess_train_data(train_set_folder, train_csv_file, img_resize=(32, 32),
 def preprocess_test_data(test_set_folder, img_resize=(32, 32), process_count=cpu_count()):
     """
     Transform the images to ready to use data for the CNN
+
     :param test_set_folder: the folder containing the images for testing
     :param img_resize: the standard size you want to have on images when transformed to matrices
     :param process_count: the number of process you want to use to preprocess the data.
@@ -207,6 +225,7 @@ def preprocess_test_data(test_set_folder, img_resize=(32, 32), process_count=cpu
 def preprocess_test_datasets(test_set_folders, img_resize=(32, 32), process_count=cpu_count()):
     """
     Transform the images to ready to use data for the CNN
+
     :param test_set_folders: the folders containing the images for testing
     :param img_resize: the standard size you want to have on images when transformed to matrices
     :param process_count: the number of process you want to use to preprocess the data.
@@ -233,6 +252,7 @@ def preprocess_data(train_set_folder, test_set_folder,
                     test_set_additional, train_csv_file, img_resize=(32, 32), process_count=cpu_count()):
     """
     Transform the all the images to ready to use data for the CNN
+    
     :param train_set_folder: the folder containing the images for training
     :param test_set_folder: the folder containing the images for testing
     :param test_set_additional: the folder containing the images for additional testing (updated on 05/05/2017) 
