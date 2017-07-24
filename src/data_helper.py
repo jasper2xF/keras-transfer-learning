@@ -10,24 +10,6 @@ from itertools import chain
 from multiprocessing import cpu_count
 from concurrent.futures import ThreadPoolExecutor
 
-DATA_ROOT = "/media/jasper/Data/ml-data/planet_ama_kg"
-
-def get_jpeg_data_files_paths():
-    """
-    Returns the input file folders path
-
-    :return: list of strings
-        The input file paths as list [train_jpeg_dir, test_jpeg_dir, test_jpeg_additional, train_csv_file]
-    """
-
-    data_root_folder = os.path.abspath(DATA_ROOT)
-    train_jpeg_dir = os.path.join(data_root_folder, 'train-jpg')
-    test_jpeg_dir = os.path.join(data_root_folder, 'test-jpg')
-    test_jpeg_additional = os.path.join(data_root_folder, 'test-jpg-additional')
-    train_csv_file = os.path.join(data_root_folder, 'train_v2.csv')
-    return [train_jpeg_dir, test_jpeg_dir, test_jpeg_additional, train_csv_file]
-
-
 def _train_transform_to_matrices(*args):
     """
     
@@ -115,7 +97,7 @@ def _get_train_matrices(train_set_folder, train_csv_file, img_resize, process_co
     files_path = []
     tags_list = []
     for file_name, tags in labels_df.values:
-        files_path.append('{}/{}.jpg'.format(train_set_folder, file_name))
+        files_path.append('{}/{}.{}'.format(train_set_folder, file_name, DATA_FORMAT))
         tags_list.append(tags)
 
     x_train = []
@@ -225,7 +207,7 @@ def preprocess_test_data(test_set_folder, img_resize=(32, 32), process_count=cpu
 def preprocess_test_datasets(test_set_folders, img_resize=(32, 32), process_count=cpu_count()):
     """
     Transform the images to ready to use data for the CNN
-    :param test_set_folder: the folder containing the images for testing
+    :param test_set_folders: the folders containing the images for testing
     :param img_resize: the standard size you want to have on images when transformed to matrices
     :param process_count: the number of process you want to use to preprocess the data.
         If you run into issues, lower this number. Its default value is equal to the number of core of your CPU
@@ -236,6 +218,8 @@ def preprocess_test_datasets(test_set_folders, img_resize=(32, 32), process_coun
     x_test = []
     x_test_filename = []
     for test_set_folder in test_set_folders:
+        if test_set_folder is None:
+            continue
         x_test_tmp, x_test_filename_tmp = _get_test_matrices(test_set_folder, img_resize, process_count)
         x_test.extend(x_test_tmp)
         x_test_filename.extend(x_test_filename_tmp)

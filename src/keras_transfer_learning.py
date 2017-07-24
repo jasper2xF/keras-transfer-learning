@@ -241,15 +241,21 @@ class TransferModel:
 
         return self.top_model.get_weights()
 
+    def set_full_retrain(self):
+        """Set architecture for complete retraining."""
+        self.top_model = Model(input=self.base_model.input, output=self.top_model(self.base_model.output))
+        self.base_model = None
+        return self.top_model.get_weights()
+
     def fine_tune_full_model(self, y_train, y_valid, learn_rate=0.001, momentum=0.9, epoch=5, batch_size=128, validation_split_size=0.2,
                              train_callbacks=()):
         """Retrain top model and last vgg16 conv block with light weight updates."""
 
         history = LossHistory()
 
-        self.top_model.compile(loss='binary_crossentropy',
-                      optimizer=optimizers.SGD(lr=learn_rate, momentum=momentum),
-                      metrics=['accuracy'])
+        opt = Adam(lr=learn_rate)
+
+        self.classifier.compile(loss='binary_crossentropy', optimizer=opt, metrics=['accuracy'])
 
         # early stopping will auto-stop training process if model stops learning after 3 epochs
         earlyStopping = EarlyStopping(monitor='val_loss', patience=10, verbose=0, mode='auto')
@@ -263,9 +269,34 @@ class TransferModel:
         fbeta_score = self._get_fbeta_score(self.top_model, self.bottleneck_feat_val, y_valid)
         return [history.train_losses, history.val_losses, fbeta_score]
 
+    def retrain_full_model(self, X_train, X_valid, y_train, y_valid, learn_rate=0.001, momentum=0.9, epoch=5, batch_size=128, validation_split_size=0.2,
+                             train_callbacks=()):
+        """Retrain top model and last vgg16 conv block with light weight updates."""
+
+        history = LossHistory()
+
+        self.top_model.compile(loss='binary_crossentropy',
+                      optimizer=optimizers.SGD(lr=learn_rate, momentum=momentum),
+                      metrics=['accuracy'])
+
+        # early stopping will auto-stop training process if model stops learning after 3 epochs
+        earlyStopping = EarlyStopping(monitor='val_loss', patience=10, verbose=0, mode='auto')
+        self.top_model.fit(X_train, y_train,
+                           epochs=epoch,
+                           batch_size=batch_size,
+                           verbose=2,
+                           validation_data=(X_valid, y_valid),
+                           callbacks=[history, *train_callbacks, earlyStopping])
+        self.fit_classification_threshold(self.top_model, X_train, y_train)
+        fbeta_score = self._get_fbeta_score(self.top_model, X_valid, y_valid)
+        return [history.train_losses, history.val_losses, fbeta_score]
+
     def predict(self, x_test):
-        bottleneck_features = self.base_model.predict(x_test)
-        predictions = self.top_model.predict(bottleneck_features)
+        if self.base_model is None:
+            predictions = self.top_model.predict(x_test)
+        else:
+            bottleneck_features = self.base_model.predict(x_test)
+            predictions = self.top_model.predict(bottleneck_features)
         return predictions
 
     def map_predictions(self, predictions, labels_map, thresholds):
