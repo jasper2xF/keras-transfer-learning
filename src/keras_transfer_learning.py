@@ -34,6 +34,7 @@ class LossHistory(Callback):
         """Append 'loss' and 'val_loss' to internal data structure."""
         self.train_losses.append(logs.get('loss'))
         self.val_losses.append(logs.get('val_loss'))
+        return None
 
 
 class TransferModel:
@@ -100,6 +101,7 @@ class TransferModel:
         self.base_model = VGG16(include_top=False, weights='imagenet',
               input_tensor=None, input_shape=(img_width, img_height, img_channels),
               pooling=None)
+        return None
 
     def build_vgg19(self, img_size, img_channels):
         """
@@ -113,6 +115,7 @@ class TransferModel:
         self.base_model = VGG19(include_top=False, weights='imagenet',
               input_tensor=None, input_shape=(img_width, img_height, img_channels),
               pooling=None)
+        return None
 
     def build_resnet50(self, img_size, img_channels):
         """
@@ -126,6 +129,7 @@ class TransferModel:
         self.base_model = ResNet50(include_top=False, weights='imagenet',
                                 input_tensor=None, input_shape=(img_width, img_height, img_channels),
                                 pooling=None)
+        return None
 
     def build_inceptionv3(self, img_size, img_channels):
         """
@@ -139,6 +143,7 @@ class TransferModel:
         self.base_model = InceptionV3(include_top=False, weights='imagenet',
                                    input_tensor=None, input_shape=(img_width, img_height, img_channels),
                                    pooling=None)
+        return None
 
     def predict_bottleneck_features(self, x_train, x_valid):
         """
@@ -210,6 +215,7 @@ class TransferModel:
         self.top_model.add(Dense(n_dense, activation='relu'))
         self.top_model.add(Dropout(dropout_rate))
         self.top_model.add(Dense(n_classes, activation='sigmoid'))
+        return None
 
     def train_top_model(self, y_train, y_valid, learn_rate=0.001, epoch=5, batch_size=128, train_callbacks=()):
         """Train top model with cross entropy loss and adam optimizer."""
@@ -240,6 +246,7 @@ class TransferModel:
         Applies to all weights if set_full_retrain() was called.
         """
         self.top_model.save_weights(weight_file_path)
+        return None
 
     def load_top_weights(self, weight_file_path):
         """
@@ -248,6 +255,7 @@ class TransferModel:
         Applies to all weights if set_full_retrain() was called.
         """
         self.top_model.load_weights(weight_file_path)
+        return None
 
     def set_top_weights(self, weights):
         """
@@ -256,6 +264,7 @@ class TransferModel:
         Applies to all weights if set_full_retrain() was called.
         """
         self.top_model.set_weights(weights)
+        return None
 
     def get_top_weights(self):
         """
@@ -386,3 +395,4 @@ class TransferModel:
     def close(self):
         """Clears backend session."""
         backend.clear_session()
+        return None
