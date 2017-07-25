@@ -10,6 +10,67 @@ from itertools import chain
 from multiprocessing import cpu_count
 from concurrent.futures import ThreadPoolExecutor
 
+
+def load_train_input(img_size, train_dir, train_csv_file, train_processed_dir):
+    """
+    Load training data, labels and label mapping.
+
+    DEPRECATED - will be replaced by generator version in future.
+
+    :param img_size: Integer for image width as well a height
+    :param train_dir: Path to directory of training images
+    :param train_csv_file: Path to csv file containing training labels
+    :param train_processed_dir: Path for saving processed data as numpy array
+    :return:
+    """
+    labels_df = pd.read_csv(train_csv_file)
+
+    # Print all unique tags
+    labels_list = list(chain.from_iterable([tags.split(" ") for tags in labels_df['tags'].values]))
+    labels_set = set(labels_list)
+
+    # Image Resize
+    img_resize = (img_size, img_size)  # The resize size of each image
+
+    data_dir = os.path.join(train_processed_dir, str(img_size))
+    if os.path.exists(data_dir):
+        x_input, y_true, y_map = load_data(data_dir)
+    else:
+        x_input, y_true, y_map = preprocess_train_data(train_dir, train_csv_file, img_resize)
+        store_data(data_dir, x_input, y_true, y_map)
+        # Free up all available memory space after this heavy operation
+        gc.collect()
+
+    return x_input, y_true, y_map
+
+
+def load_test_input(img_size, test_dir, test_dir_additional, test_processed_dir):
+    """
+    Load training data, labels and label mapping.
+
+    DEPRECATED - will be replaced by generator version in future.
+
+    :param img_size: Integer for image width as well a height
+    :param test_dir: Path to directory of testing images
+    :param test_dir_additional: Path to additional directory of testing images
+    :param test_processed_dir: Path for saving processed data as numpy array
+    :return:
+    """
+    img_resize = (img_size, img_size)
+
+    data_dir = os.path.join(test_processed_dir, str(img_size))
+    if os.path.exists(data_dir):
+        x_test, x_test_filename = load_test_data(data_dir)
+    else:
+        x_test, x_test_filename = preprocess_test_datasets([test_dir, test_dir_additional],
+                                                                       img_resize)
+        store_test_data(data_dir, x_test, x_test_filename)
+        # Free up all available memory space after this heavy operation
+        gc.collect()
+
+    return x_test, x_test_filename
+
+
 def _train_transform_to_matrices(*args):
     """
 
@@ -19,7 +80,7 @@ def _train_transform_to_matrices(*args):
         tags: list of strings
             The associated tags
         labels_map: dict {int: string}
-            The map between the image label and their id 
+            The map between the image label and their id
         img_resize: tuple (int, int)
             The resize size of the original image given by the file_path argument
     :return: img_array, targets
@@ -151,10 +212,10 @@ def _get_test_matrices(test_set_folder, img_resize, process_count):
     return [x_test, x_test_filename]
 
 
-def load_data(data_dir):
+def load_data(data_dir, mmap_mode=None):
     """Loads previously processed and stored data."""
-    x_input = np.load(os.path.join(data_dir, "x_input.npy"))
-    y_input = np.load(os.path.join(data_dir, "y_input.npy"))
+    x_input = np.load(os.path.join(data_dir, "x_input.npy"), mmap_mode=mmap_mode)
+    y_input = np.load(os.path.join(data_dir, "y_input.npy"), mmap_mode=mmap_mode)
     # load numpy array and get dict
     y_map = np.load(os.path.join(data_dir, "y_map.npy")).item()
     return x_input, y_input, y_map
@@ -169,10 +230,10 @@ def store_data(data_dir, x_input, y_input, y_map):
     np.save(os.path.join(data_dir, "y_map.npy"), y_map)
     return None
 
-def load_test_data(data_dir):
+def load_test_data(data_dir, mmap_mode=None):
     """Loads previously processed and stored data."""
-    x_test = np.load(os.path.join(data_dir, "x_test.npy"))
-    x_test_filename = np.load(os.path.join(data_dir, "x_test_filename.npy"))
+    x_test = np.load(os.path.join(data_dir, "x_test.npy"), mmap_mode=mmap_mode)
+    x_test_filename = np.load(os.path.join(data_dir, "x_test_filename.npy"), mmap_mode=mmap_mode)
     return x_test, x_test_filename
 
 
@@ -252,7 +313,7 @@ def preprocess_data(train_set_folder, test_set_folder,
                     test_set_additional, train_csv_file, img_resize=(32, 32), process_count=cpu_count()):
     """
     Transform the all the images to ready to use data for the CNN
-    
+
     :param train_set_folder: the folder containing the images for training
     :param test_set_folder: the folder containing the images for testing
     :param test_set_additional: the folder containing the images for additional testing (updated on 05/05/2017) 
