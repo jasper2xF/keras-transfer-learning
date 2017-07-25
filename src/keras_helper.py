@@ -83,7 +83,8 @@ class AmazonKerasClassifier:
 
         return self.classification_threshold
 
-    def train_model_new(self, X_train, X_valid, y_train, y_valid, learn_rate=0.001, epoch=5, batch_size=128, validation_split_size=0.2, train_callbacks=()):
+    def train_model(self, X_train, X_valid, y_train, y_valid, learn_rate=0.001, epoch=5, batch_size=128,
+                        validation_split_size=0.2, train_callbacks=(), early_stop_patience=5):
         history = LossHistory()
 
         opt = Adam(lr=learn_rate)
@@ -92,7 +93,7 @@ class AmazonKerasClassifier:
 
 
         # early stopping will auto-stop training process if model stops learning after 3 epochs
-        earlyStopping = EarlyStopping(monitor='val_loss', patience=3, verbose=0, mode='auto')
+        earlyStopping = EarlyStopping(monitor='val_loss', patience=early_stop_patience, verbose=0, mode='auto')
 
         self.classifier.fit(X_train, y_train,
                             batch_size=batch_size,
@@ -101,29 +102,6 @@ class AmazonKerasClassifier:
                             validation_data=(X_valid, y_valid),
                             callbacks=[history, *train_callbacks, earlyStopping])
         self.fit_classification_threshold(self.classifier, X_train, y_train)
-        fbeta_score = self._get_fbeta_score(self.classifier, X_valid, y_valid)
-        return [history.train_losses, history.val_losses, fbeta_score]
-
-    def train_model(self, x_train, y_train, learn_rate=0.001, epoch=5, batch_size=128, validation_split_size=0.2, train_callbacks=()):
-        history = LossHistory()
-
-        X_train, X_valid, y_train, y_valid = train_test_split(x_train, y_train,
-                                                              test_size=validation_split_size)
-
-        opt = Adam(lr=learn_rate)
-
-        self.classifier.compile(loss='binary_crossentropy', optimizer=opt, metrics=['accuracy'])
-
-
-        # early stopping will auto-stop training process if model stops learning after 3 epochs
-        earlyStopping = EarlyStopping(monitor='val_loss', patience=3, verbose=0, mode='auto')
-
-        self.classifier.fit(X_train, y_train,
-                            batch_size=batch_size,
-                            epochs=epoch,
-                            verbose=2,
-                            validation_data=(X_valid, y_valid),
-                            callbacks=[history, *train_callbacks, earlyStopping])
         fbeta_score = self._get_fbeta_score(self.classifier, X_valid, y_valid)
         return [history.train_losses, history.val_losses, fbeta_score]
 
