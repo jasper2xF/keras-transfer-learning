@@ -336,7 +336,7 @@ class TransferModel:
         fbeta_score = self._get_fbeta_score(self.top_model, self.bottleneck_feat_val, y_valid)
         return [history.train_losses, history.val_losses, fbeta_score]
 
-    def retrain_full_model(self, X_train, X_valid, y_train, y_valid, learn_rate=0.001, momentum=0.9, epoch=5, batch_size=128,
+    def retrain_full_model(self, x_train, x_valid, y_train, y_valid, learn_rate=0.001, momentum=0.9, epoch=5, batch_size=128,
                              train_callbacks=(), early_stop_patience=10):
         """
         Retrain top model with full base model.
@@ -352,15 +352,15 @@ class TransferModel:
                       metrics=['accuracy'])
 
         # early stopping will auto-stop training process if model stops learning after 3 epochs
-        earlyStopping = EarlyStopping(monitor='val_loss', patience=early_stop_patience, verbose=0, mode='auto')
-        self.top_model.fit(X_train, y_train,
+        early_stopping = EarlyStopping(monitor='val_loss', patience=early_stop_patience, verbose=0, mode='auto')
+        self.top_model.fit(x_train, y_train,
                            epochs=epoch,
                            batch_size=batch_size,
                            verbose=2,
-                           validation_data=(X_valid, y_valid),
-                           callbacks=[history, *train_callbacks, earlyStopping])
-        self.fit_classification_threshold(self.top_model, X_train, y_train)
-        fbeta_score = self._get_fbeta_score(self.top_model, X_valid, y_valid)
+                           validation_data=(x_valid, y_valid),
+                           callbacks=[history, *train_callbacks, early_stopping])
+        self.fit_classification_threshold(self.top_model, x_train, y_train)
+        fbeta_score = self._get_fbeta_score(self.top_model, x_valid, y_valid)
         return [history.train_losses, history.val_losses, fbeta_score]
 
     def predict(self, x_input):
