@@ -2,5 +2,5 @@
 
 Use python 3
 
-Inspried from:
+Inspired from:
 https://github.com/EKami/planet-amazon-deforestation
