@@ -191,7 +191,7 @@ def retrain_model(architecture, x_input, y_true, img_size, annealing, batch_size
 
 def load_fine_tuned_model(architecture, img_size, n_classes, n_untrained_layers, top_weights_path, fine_weights_path):
     classifier = TransferModel()
-    classifier.build_base_model(architecture, [img_size, img_size], 3, n_classes)
+    classifier.build_base_model(architecture, [img_size, img_size], 3)
     classifier.build_top_model(n_classes)
     classifier.load_top_weights(top_weights_path)
     classifier.split_fine_tuning_models(n_untrained_layers)
@@ -201,7 +201,7 @@ def load_fine_tuned_model(architecture, img_size, n_classes, n_untrained_layers,
 
 def load_retrained_model(architecture, img_size, n_classes, top_weights_path, fine_weights_path):
     classifier = TransferModel()
-    classifier.build_base_model(architecture, [img_size, img_size], 3, n_classes)
+    classifier.build_base_model(architecture, [img_size, img_size], 3)
     classifier.build_top_model(n_classes)
     classifier.load_top_weights(top_weights_path)
     classifier.set_full_retrain()
@@ -223,7 +223,7 @@ def train_partial_model(architecture, batch_size, best_full_weights_path, classi
     init_top_weights = classifier.split_fine_tuning_models(n_untrained_layers)
     split_layer_name = classifier.base_model.layers[n_untrained_layers].name
     logger.info("Splitting at: " + split_layer_name + "(last base model layer)")
-    classifier.predict_bottleneck_features(X_train, X_valid, validation_split_size=validation_split_size)
+    classifier.predict_bottleneck_features(X_train, X_valid)
 
     logger.info("Bottleneck features calculated.")
     train_losses_full, val_losses_full = [], []
@@ -244,7 +244,6 @@ def train_partial_model(architecture, batch_size, best_full_weights_path, classi
         tmp_train_losses, tmp_val_losses, fbeta_score = classifier.fine_tune_full_model(y_train, y_valid, learn_rate,
                                                                                         momentum, epochs,
                                                                                         batch_size,
-                                                                                        validation_split_size,
                                                                                         train_callbacks=[
                                                                                             checkpoint_full])
 
@@ -319,7 +318,6 @@ def retrain_full_model(architecture, batch_size, best_retrain_weights_path, clas
         tmp_train_losses, tmp_val_losses, fbeta_score = classifier.retrain_full_model(X_train, X_valid, y_train, y_valid, learn_rate,
                                                                                         momentum, epochs,
                                                                                         batch_size,
-                                                                                        validation_split_size,
                                                                                         train_callbacks=[
                                                                                             checkpoint_full])
 
@@ -377,9 +375,9 @@ def train_top_model(architecture, img_size, batch_size, best_top_weights_path, t
     logger.info("Training dense top model.")
     classifier = TransferModel()
     logger.info("Classifier initialized.")
-    classifier.build_base_model(architecture, img_resize, 3, n_classes)
+    classifier.build_base_model(architecture, img_resize, 3)
     logger.info("Base model " + architecture + " built.")
-    classifier.predict_bottleneck_features(X_train, X_valid, validation_split_size=validation_split_size)
+    classifier.predict_bottleneck_features(X_train, X_valid)
 
     logger.info("Bottleneck features calculated.")
     classifier.build_top_model(n_classes)
@@ -389,7 +387,6 @@ def train_top_model(architecture, img_size, batch_size, best_top_weights_path, t
     for learn_rate, epochs in zip(top_learn_rates, top_epochs_arr):
         tmp_train_losses, tmp_val_losses, fbeta_score = classifier.train_top_model(y_train, y_valid, learn_rate, epochs,
                                                                                    batch_size,
-                                                                                   validation_split_size=validation_split_size,
                                                                                    train_callbacks=[checkpoint_top])
         train_losses += tmp_train_losses
         val_losses += tmp_val_losses
@@ -618,18 +615,18 @@ def main():
     # Top model parameters
     # learning rate annealing schedule
     top_epochs_arr = [20, 50]
-    #top_epochs_arr = [1, 1]
+    top_epochs_arr = [1, 1]
     top_learn_rates = [0.0001, 0.00001]
     # top_epochs_arr = [50]
     # top_epochs_arr = [1]
     # top_learn_rates = [0.00001]
     # Fine tuning parameters
     max_train_time_hrs = 3
-    n_untrained_layers = [0]
+    n_untrained_layers = 0
     #n_untrained_layers = 0
     #fine_epochs_arr = [5, 50]  # , 300, 500]
     fine_epochs_arr = [80]  # , 300, 500]
-    #fine_epochs_arr = [1, 1]
+    fine_epochs_arr = [1, 1]
     #fine_learn_rates = [0.01, 0.001]  # , 0.0001, 0.00001]
     fine_learn_rates = [0.0001]
     fine_momentum_arr = [0.9, 0.9]  # , 0.9, 0.9]
@@ -652,12 +649,12 @@ def main():
     n_classes = 17
 
     train_top = False
-    train = False
+    train = True
     train_cnn = False
-    load = True
+    load = False
     load_cnn_model = False
     eval = False
-    generate_test = True
+    generate_test = False
     generate_test_ensemble = False
 
     classifiers = []
