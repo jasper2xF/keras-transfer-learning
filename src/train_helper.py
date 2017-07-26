@@ -12,28 +12,22 @@ import matplotlib.pyplot as plt
 
 import os
 import gc
+import logging
+import time
 import numpy as np
 import pandas as pd
 import seaborn as sns
 import tensorflow as tf
 
-
-import data_helper
-import planet_kaggle_helper
-
-from keras_transfer_learning import TransferModel
-from keras_helper import AmazonKerasClassifier as CNNModel
-
 from kaggle_data.downloader import KaggleDataDownloader
 from keras.callbacks import ModelCheckpoint
-
 from sklearn.metrics import fbeta_score
-
-import logging
-import time
-
 from itertools import chain
 from sklearn.model_selection import train_test_split
+
+import data_helper
+from keras_transfer_learning import TransferModel
+from keras_helper import AmazonKerasClassifier as CNNModel
 
 # Setup logging to std out
 logger = logging.getLogger()
@@ -45,10 +39,9 @@ logger.setLevel(logging.DEBUG)
 
 logger.debug("TensorFlow version: " + tf.__version__)
 
-DATA_FORMAT = planet_kaggle_helper.DATA_FORMAT
 
-
-def run(architecture, batch_size, best_cnn_weights_path, best_fine_weights_path, best_retrain_weights_path,
+def run(train_processed_dir, test_processed_dir, train_dir, test_dir, test_additional, train_csv_file,
+        architecture, batch_size, best_cnn_weights_path, best_fine_weights_path, best_retrain_weights_path,
         best_top_weights_path, cnn_epochs_arr, cnn_learn_rates, retrain_epochs_arr, retrain_learn_rates,
         retrain_momentum_arr, submit, img_size, load, load_cnn_model, load_cnn_weights_path,
         load_full_weights_path, load_top_weights_path, max_train_time_hrs, n_classes, n_untrained_layers,
@@ -67,7 +60,12 @@ def run(architecture, batch_size, best_cnn_weights_path, best_fine_weights_path,
     The submission file is generated (submit=True) based on all trained and loaded models. The models are ensembled by
     the average sum of output scores.
 
-
+    :param train_processed_dir: Path for loading/storing numpy array of processed training data
+    :param test_processed_dir: Path for loading/storing numpy array of processed training data
+    :param train_dir: Path for training images
+    :param test_dir: Path for testing imags
+    :param test_additional: Path for additional testing images
+    :param train_csv_file: Path for training images label file
     :param architecture: Retraining architecture {vgg16, vgg19, resnet50, inceptionv3}
     :param batch_size: Batch size for training iterations
     :param best_cnn_weights_path: Storage path for best cnn weights
@@ -111,10 +109,6 @@ def run(architecture, batch_size, best_cnn_weights_path, best_fine_weights_path,
 
     #Classifier list for ensemble submission, could also be list of length 1
     classifiers = []
-
-    # get data paths from competition helper
-    train_processed_dir, test_processed_dir = planet_kaggle_helper.get_proccessed_data_paths()
-    train_dir, test_dir, test_additional, train_csv_file = planet_kaggle_helper.get_data_files_paths()
 
     if retrain or train_top or train_cnn or submit:
         #load input data for training or submission

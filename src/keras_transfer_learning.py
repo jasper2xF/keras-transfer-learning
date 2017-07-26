@@ -39,7 +39,7 @@ class LossHistory(Callback):
 
 class TransferModel:
     """
-    Class for retraining VGG16 architecture.
+    Class for retraining VGG16, VGG19, ResNet-50, Inception-v3 architectures.
 
     Supports retraining dense top_model:
         classifier = TransferModel()
