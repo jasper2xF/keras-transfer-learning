@@ -2,6 +2,8 @@
 """Training script for planet amazon deforestation kaggle."""
 import sys
 import train_helper
+import planet_kaggle_helper
+
 
 def main():
     run_name = ""
@@ -54,7 +56,12 @@ def main():
         top_epochs_arr = [1, 1]
         fine_epochs_arr = [1, 1]
 
-    train_helper.run(architecture, batch_size, best_cnn_weights_path, best_fine_weights_path, best_retrain_weights_path,
+    # get data paths from competition helper
+    train_processed_dir, test_processed_dir = planet_kaggle_helper.get_proccessed_data_paths()
+    train_dir, test_dir, test_additional, train_csv_file = planet_kaggle_helper.get_data_files_paths()
+
+    train_helper.run(train_processed_dir, test_processed_dir, train_dir, test_dir, test_additional, train_csv_file,
+        architecture, batch_size, best_cnn_weights_path, best_fine_weights_path, best_retrain_weights_path,
         best_top_weights_path, cnn_epochs_arr, cnn_learn_rates, fine_epochs_arr, fine_learn_rates,
         fine_momentum_arr, submit, img_size, load, load_cnn_model, load_cnn_weights_path,
         load_full_weights_path, load_top_weights_path, max_train_time_hrs, n_classes, n_untrained_layers,
