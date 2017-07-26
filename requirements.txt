@@ -1,0 +1,11 @@
+matplotlib==2.0.2
+Keras==2.0.6
+numpy==1.13.1
+tensorflow_gpu==1.2.1
+pandas==0.20.1
+h5py==2.7.0
+kaggle_data==0.1
+tqdm==4.14.0
+Pillow==4.2.1
+seaborn==0.8
+scikit_learn==0.19b2
