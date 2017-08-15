@@ -217,6 +217,29 @@ class TransferModel:
         self.top_model.add(Dense(n_classes, activation='sigmoid'))
         return None
 
+    def build_top_model_gen(self, n_classes, n_dense=256, dropout_rate=0.3):
+        """
+        Build a top model top use on top of base architecture.
+
+        Creates one dense layer of 'relu' units of dimension n_dense and an output layer of 'sigmoid' units or
+        dimension n_classe.
+        :param n_classes: Number of output 'sigmoid' units
+        :param n_dense: Number of dense layer 'relu' units (default=256)
+        :param dropout_rate: Dropout rate for dense layer (default=0.3)
+        :return:
+        """
+        self.top_model.add(Flatten(input_shape=self.base_model.output_shape[1:]))
+        self.top_model.add(Dense(n_dense, activation='relu'))
+        self.top_model.add(Dropout(dropout_rate))
+        self.top_model.add(Dense(n_classes, activation='sigmoid'))
+
+        # Create full model
+        self.full_model = Model(input=self.base_model.input, output=self.top_model(self.base_model.output))
+        # Set retraining of base model layers to false
+        for layer in self.full_model.layers[:len(self.base_model.layers)]:
+            layer.trainable = False
+        return None
+
     def train_top_model(self, y_train, y_valid, learn_rate=0.001, epoch=5, batch_size=128, train_callbacks=()):
         """Train top model with cross entropy loss and adam optimizer."""
         history = LossHistory()
@@ -239,6 +262,48 @@ class TransferModel:
         fbeta_score = self._get_fbeta_score(self.top_model, self.bottleneck_feat_val, y_valid)
         return [history.train_losses, history.val_losses, fbeta_score]
 
+    def train_top_model_gen(self, train_generator, steps, x_valid, y_valid, learn_rate=0.001, epoch=5,
+                            train_callbacks=()):
+        """
+        Train top model as part of full model architecture.
+
+        :param train_generator: generator
+            Yields training images and labels
+        :param steps: int
+            Number of batch steps in generator
+        :param x_valid: Numpy array
+            Array of training data
+        :param y_valid: Numpy array
+            Array of labels
+        :param learn_rate: float
+            Learning rate for SDG
+        :param epoch:
+            Number of training epochs
+        :param train_callbacks: keras callback
+            Training callbacks for fit method
+        :return: [Training losses, validation losses, f2 score]
+        """
+        history = LossHistory()
+
+        opt = Adam(lr=learn_rate)
+
+        self.full_model.compile(loss='binary_crossentropy', optimizer=opt, metrics=['accuracy'])
+
+        # early stopping will auto-stop training process if model stops learning after 3 epochs
+        early_stopping = EarlyStopping(monitor='val_loss', patience=3, verbose=0, mode='auto')
+
+        self.full_model.fit_generator(train_generator,
+                            steps,
+                            epochs=epoch,
+                            verbose=2,
+                            validation_data=(x_valid, y_valid),
+                            callbacks=[history, *train_callbacks, early_stopping])
+
+        #determine classification threshold
+        self.fit_classification_threshold(self.full_model, x_valid, y_valid)
+        fbeta_score = self._get_fbeta_score(self.full_model, x_valid, y_valid)
+        return [history.train_losses, history.val_losses, fbeta_score]
+
     def save_top_weights(self, weight_file_path):
         """
         Save top model weights.
@@ -250,11 +315,19 @@ class TransferModel:
 
     def load_top_weights(self, weight_file_path):
         """
-        Lead top model weights.
+        Load top model weights.
 
         Applies to all weights if set_full_retrain() was called.
         """
         self.top_model.load_weights(weight_file_path)
+        return None
+
+    def load_full_weights(self, weight_file_path):
+        """
+        Load full model weights.
+
+        """
+        self.full_model.load_weights(weight_file_path)
         return None
 
     def set_top_weights(self, weights):
@@ -308,6 +381,16 @@ class TransferModel:
         self.top_model = Model(input=self.base_model.input, output=self.top_model(self.base_model.output))
         self.base_model = None
         return self.top_model.get_weights()
+
+    def set_full_retrain_gen(self):
+        """
+        Sets base model layers to trainable in full model.
+
+        :return: Weights of model
+        """
+        for layer in self.full_model.layers[:len(self.base_model.layers)]:
+            layer.trainable = True
+        return self.full_model.get_weights()
 
     def fine_tune_full_model(self, y_train, y_valid, learn_rate=0.001, momentum=0.9, epoch=5, batch_size=128,
                              train_callbacks=(), early_stop_patience=10):
@@ -363,6 +446,51 @@ class TransferModel:
         fbeta_score = self._get_fbeta_score(self.top_model, x_valid, y_valid)
         return [history.train_losses, history.val_losses, fbeta_score]
 
+    def retrain_full_model_gen(self, train_generator, steps, x_valid, y_valid, learn_rate=0.001, momentum=0.9, epoch=5,
+                            train_callbacks=(), early_stop_patience=5):
+        """
+        Retrain full model via generator.
+
+        :param train_generator: generator
+            Yields training images and labels
+        :param steps: int
+            Number of batch steps in generator
+        :param x_valid: Numpy array
+            Array of training data
+        :param y_valid: Numpy array
+            Array of labels
+        :param learn_rate: float
+            Learning rate for SDG
+        :param momentum: float
+            Momentum for SGD
+        :param epoch:
+            Number of training epochs
+        :param train_callbacks: keras callback
+            Training callbacks for fit method
+        :param early_stop_patience: int
+            Number of no loss improvement steps before early stopping
+        :return: [Training losses, validation losses, f2 score]
+        """
+        history = LossHistory()
+
+        opt = Adam(lr=learn_rate)
+
+        self.full_model.compile(loss='binary_crossentropy', optimizer=opt, metrics=['accuracy'])
+
+        # early stopping will auto-stop training process if model stops learning after 3 epochs
+        early_stopping = EarlyStopping(monitor='val_loss', patience=early_stop_patience, verbose=0, mode='auto')
+        self.full_model.fit_generator(train_generator,
+                                      steps,
+                                      epochs=epoch,
+                                      verbose=2,
+                                      validation_data=(x_valid, y_valid),
+                                      callbacks=[history, *train_callbacks, early_stopping])
+
+        #determine classification threshold
+        self.fit_classification_threshold(self.full_model, x_valid, y_valid)
+        fbeta_score = self._get_fbeta_score(self.full_model, x_valid, y_valid)
+        return [history.train_losses, history.val_losses, fbeta_score]
+
     def predict(self, x_input):
         """
         Predict output for given input.
@@ -370,10 +498,37 @@ class TransferModel:
         :param x_input: Model input
         :return: Predictions of output layer
         """
-        if self.base_model is None:
+        if self.full_model is not None:
+            predictions = self.full_model.predict(x_input)
+        elif self.base_model is None:
             predictions = self.top_model.predict(x_input)
         else:
             bottleneck_features = self.base_model.predict(x_input)
+            predictions = self.top_model.predict(bottleneck_features)
+        return predictions
+
+    def predict_gen(self, test_gen, steps):
+        """
+        Predict output for given input.
+
+        :param test_gen: generator
+            Yields test images
+        :param steps: int
+            Number of batch steps in generator
+        :return: Predictions of output layer
+        """
+        if self.full_model is not None:
+            predictions = self.full_model.predict_generator(generator=test_gen,
+                                                                  verbose=2,
+                                                                  steps=steps)
+        elif self.base_model is None:
+            predictions = self.top_model.predict_generator(generator=test_gen,
+                                                                  verbose=2,
+                                                                  steps=steps)
+        else:
+            bottleneck_features = self.base_model.predict_generator(generator=test_gen,
+                                                                  verbose=2,
+                                                                  steps=steps)
             predictions = self.top_model.predict(bottleneck_features)
         return predictions
 
