@@ -11,7 +11,7 @@ keras models supported for fine-tuning/retraing are:
 The TransferModel class in src/keras_transfer_learning.py wraps model functionality and src/train_helper.py offers a
 training suite.
 
-It is recommended to keep data specific code in seperate scripts. See branch planet-amazon-kaggle-src for an example of
+It is recommended to keep data specific code in seperate scripts. See branch planet-amazon-kaggle-src (currently outdated, sorry) for an example of
 using the retraining functionality on data of the 
 [Planet: Understanding the Amazon from Space](https://www.kaggle.com/c/planet-understanding-the-amazon-from-space) 
 kaggle competition.
@@ -19,7 +19,7 @@ kaggle competition.
 Make sure to use python 3, some code is not compatible with python 2
 
 This project was inspired from:  
-[https://github.com/EKami/planet-amazon-deforestation]()  
+[https://github.com/EKami/planet-amazon-deforestation](https://github.com/EKami/planet-amazon-deforestation)  
 I recommend it for a wonderful jupyter notebook breakdown of training a CNN on competition data.
 
 ##### Requirements  
